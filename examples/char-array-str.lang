@@ -1,0 +1,13 @@
+def func = \ -> <[128 x char]>
+  let chars = [128 x char] zero
+  let chars2 = [128 x char] SET chars 0 'a'
+  let chars3 = [128 x char] SET chars2 1 'b'
+  let chars4 = [128 x char] SET chars3 2 'c'
+  <chars4>
+
+def main = \IO io -> IO
+  let s = <[128 x char]> call func end
+  call write
+    call write io GET [128 x char] s 0 end
+    "\n"
+  end

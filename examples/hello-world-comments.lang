@@ -1,0 +1,9 @@
+# This is the main function.
+# It takes a single argument of type io.
+def main = \IO io -> IO
+  # `let` actually just evaluates to the expression after the let assignment.
+  let write_alias =
+  # In between expressions.
+    \IO [13 x char] -> IO write
+  call write_alias io "Hello world\n" end
+  # The final `call` returns an IO type for main.

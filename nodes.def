@@ -1,0 +1,63 @@
+#ifndef NODE
+#define NODE(name)
+#endif
+
+#ifndef EXPR
+#define EXPR(name) NODE(name)
+#endif
+
+#ifndef EXPR_FIRST
+#define EXPR_FIRST(name) EXPR(name)
+#endif
+
+#ifndef EXPR_LAST
+#define EXPR_LAST(name) EXPR(name)
+#endif
+
+#ifndef TYPE
+#define TYPE(name) NODE(name)
+#endif
+
+#ifndef TYPE_FIRST
+#define TYPE_FIRST(name) TYPE(name)
+#endif
+
+#ifndef TYPE_LAST
+#define TYPE_LAST(name) TYPE(name)
+#endif
+
+NODE(Define)
+
+EXPR_FIRST(Write)
+EXPR(Readc)
+EXPR(Declare)
+EXPR(Composite)
+EXPR(Get)
+EXPR(Set)
+// EXPR(None)
+EXPR(Call)
+EXPR(Let)
+EXPR(Keep)
+EXPR(Callable)
+EXPR(Arg)
+EXPR(Zero)
+EXPR(Cast)
+EXPR(Int)
+EXPR(BinOp)
+EXPR(If)
+EXPR(Bool)
+EXPR(Char)
+EXPR_LAST(Str)
+
+TYPE_FIRST(NamedType)
+TYPE(CompositeType)
+TYPE(ArrayType)
+TYPE_LAST(CallableType)
+
+#undef TYPE
+#undef TYPE_LAST
+#undef TYPE_FIRST
+#undef EXPR
+#undef EXPR_LAST
+#undef EXPR_FIRST
+#undef NODE

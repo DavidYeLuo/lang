@@ -1,0 +1,97 @@
+def writeln_str = \IO io [128 x char] s -> IO
+  let io2 = IO call write io s end
+  call write io2 "\n" end
+
+def any_3 = \bool a bool b bool c -> bool
+  OR a OR b c
+
+def skip_ws = \IO io -> <IO int>
+  let res = <IO int> call readc io end
+  let io2 = IO GET IO res 0
+  let c = int GET int res 1
+  if OR
+      EQ c CAST int '\n'
+      EQ c CAST int ' '
+    call skip_ws io2 end
+  else
+    <io2 c>
+
+def __read_token_remaining = \IO io [128 x char] buff int idx -> <[128 x char] IO int>
+  let res = <IO int> call readc io end
+  let io2 = IO GET IO res 0
+  let c = int GET int res 1
+  if OR
+       OR
+         OR
+           LT c 0
+           EQ CAST char c ' '
+         EQ CAST char c '\n'
+       GE idx 127
+    <buff io2 GET int res 1>
+  else
+    let newbuff = [128 x char] SET buff idx CAST char c
+    call __read_token_remaining io2 newbuff ADD idx 1 end
+
+def __read_string_token_impl = \IO io [128 x char] buff int idx -> <[128 x char] IO int>
+  let next = <IO int> call readc io end
+  let next_IO = IO GET IO next 0
+  let next_c = int GET int next 1
+  if OR
+       LT next_c 0
+       GE idx 127
+    <buff next_IO next_c>
+  else
+
+  if EQ next_c CAST int '"'
+    <SET buff idx '"' next_IO next_c>
+  else
+
+  call __read_string_token_impl
+    next_IO
+    SET buff idx CAST char next_c
+    ADD idx 1
+    end
+
+def __read_string_token = \IO io -> <[128 x char] IO int>
+  let buff = [128 x char] zero
+  let buff2 = [128 x char] SET buff 0 '"'
+  call __read_string_token_impl io buff2 1 end
+
+# Returns
+#   - buffer of the original chars
+#   - IO
+#   - The last char read
+def read_token = \IO io int idx -> <[128 x char] IO int>
+  let skipped = <IO int> call skip_ws io end
+  let skipped_IO = IO GET IO skipped 0
+  let last_c = int GET int skipped 1
+  let buff = [128 x char] zero
+  if LT last_c 0
+    <buff skipped_IO last_c>
+  else
+
+  # Handle strings.
+  if EQ last_c CAST int '"'
+    call __read_string_token skipped_IO end
+  else
+
+  call __read_token_remaining
+    skipped_IO
+    SET buff 0 last_c
+    1
+    end
+
+def read_all_tokens = \IO io -> IO
+  let res = <[128 x char] IO int> call read_token io 0 end
+  let c = int GET int res 2
+  if LT c 0
+    io
+  else
+    let io2 = IO call writeln_str
+      GET IO res 1
+      GET [128 x char] res 0
+      end
+    call read_all_tokens io2 end
+
+def main = \IO io -> IO
+  call read_all_tokens io end

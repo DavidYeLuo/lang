@@ -1,0 +1,12 @@
+def sum = \int lim int x int accum -> int
+  if GE x lim
+    accum
+  else
+    if OR EQ MOD x 3 0 EQ MOD x 5 0
+      call sum lim ADD x 1 ADD accum x end
+    else
+      call sum lim ADD x 1 accum end
+
+def main = \IO io -> IO
+  let x = int call sum 1000 0 0 end
+  call write io x end

@@ -1,0 +1,20 @@
+def unwrap = \char c -> <int char>
+  <CAST int c c>
+
+def func = \IO io char c char last -> IO
+  if LT last c
+    io
+  else
+    let res = <int char> call unwrap c end
+    let res0 = int GET int res 0
+    let res1 = char GET char res 1
+    let io2 = IO call write io res0 end
+    let io3 = IO call write io2 " " end
+    let io4 = IO call write io3 res1 end
+    let io5 = IO call write io4 "\n" end
+    call func io5 ADD c CAST char 1 last end
+
+def main = \IO io -> IO
+  let start = char 'a'
+  let last = char 'z'
+  call func io start last end

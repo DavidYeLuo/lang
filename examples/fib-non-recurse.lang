@@ -1,0 +1,20 @@
+def fib_impl = \int lim int x int fib_n_1 int fib_n -> int
+  if EQ x lim
+    fib_n
+  else
+    call fib_impl
+      lim
+      ADD x 1
+      fib_n
+      ADD fib_n fib_n_1
+    end
+
+def fib = \int n -> int
+  if LT n 2
+    n
+  else
+    call fib_impl n 2 1 1 end
+
+def main = \IO io -> IO
+  let x = int call fib 10 end
+  call write io x end

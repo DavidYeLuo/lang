@@ -1,0 +1,20 @@
+decl strcmp = \str str -> int
+
+def writeln_str = \IO io str s -> IO
+  let io2 = IO call write io s end
+  call write io2 "\n" end
+
+def writeln_str_bool = \IO io str s bool b -> IO
+  let io2 = IO call write io s end
+  let b_str = str if b "true" else "false"
+  let io3 = IO call write io2 b_str end
+  call write io3 "\n" end
+
+def streq = \str s1 str s2 -> bool
+  let res = int call strcmp s1 s2 end
+  EQ res 0
+
+def main = \IO io -> IO
+  let io2 = IO call writeln_str_bool io "abc == abc: " call streq "abc" "abc" end end
+  let io3 = IO call writeln_str_bool io2 "abc == xyz: " call streq "abc" "xyz" end end
+  io3

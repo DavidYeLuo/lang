@@ -1,0 +1,2 @@
+def main = \IO io -> IO
+  call write io "Hello world\n" end
