@@ -1,3 +1,4 @@
+#include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <string_view>
@@ -10,11 +11,66 @@
 
 #include "astdumper.h"
 #include "compiler.h"
+#include "llvm/IR/DIBuilder.h"
+#include "llvm/IR/DebugInfoMetadata.h"
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/raw_os_ostream.h"
 #include "llvm/Support/raw_ostream.h"
 
 namespace lang {
+
+llvm::DIType *Compiler::getDIType(const NamedType &named_ty) {
+  if (named_ty.getName() == builtins::kIOTypeName)
+    return di_builder_.createBasicType(named_ty.getName(), /*SizeInBits=*/32,
+                                       llvm::dwarf::DW_ATE_unsigned);
+  if (named_ty.getName() == builtins::kIntTypeName)
+    return di_builder_.createBasicType(named_ty.getName(), /*SizeInBits=*/32,
+                                       llvm::dwarf::DW_ATE_signed);
+  if (named_ty.getName() == builtins::kBoolTypeName)
+    return di_builder_.createBasicType(named_ty.getName(), /*SizeInBits=*/8,
+                                       llvm::dwarf::DW_ATE_boolean);
+  if (named_ty.getName() == builtins::kCharTypeName)
+    return di_builder_.createBasicType(named_ty.getName(), /*SizeInBits=*/8,
+                                       llvm::dwarf::DW_ATE_signed_char);
+  if (named_ty.getName() == builtins::kCPtrTypeName)
+    return di_builder_.createBasicType(named_ty.getName(), /*SizeInBits=*/64,
+                                       llvm::dwarf::DW_ATE_address);
+  if (named_ty.getName() == builtins::kNoneTypeName)
+    return di_builder_.createBasicType(named_ty.getName(), /*SizeInBits=*/64,
+                                       llvm::dwarf::DW_ATE_unsigned);
+
+  std::cerr << "Unhandled named type dwarf ecoding\n";
+  __builtin_trap();
+}
+
+llvm::DIType *Compiler::getDIType(const CompositeType &comp_ty) {
+  llvm::Type *llvm_ty = getLLVMType(comp_ty);
+  return di_builder_.createStructType(
+      &di_unit_, /*Name=*/"", &di_unit_, /*LineNumber=*/0,
+      mod_.getDataLayout().getTypeAllocSizeInBits(llvm_ty),
+      mod_.getDataLayout().getTypeAllocSizeInBits(llvm_ty),
+      llvm::DINode::FlagZero, /*DerivedFrom=*/nullptr, llvm::DINodeArray());
+}
+
+llvm::DIType *Compiler::getDIType(const ArrayType &arr_ty) {
+  return di_builder_.createArrayType(
+      arr_ty.getNumElems(),
+      mod_.getDataLayout().getTypeAllocSizeInBits(getLLVMType(arr_ty)),
+      getDIType(arr_ty.getElemType()), llvm::DINodeArray());
+}
+
+llvm::DIType *Compiler::getDIType(const CallableType &callable_ty) {
+  std::vector<llvm::Metadata *> EltTys;
+
+  // Add the result type.
+  EltTys.push_back(getDIType(callable_ty.getReturnType()));
+
+  for (size_t i = 0; i < callable_ty.getNumArgs(); ++i)
+    EltTys.push_back(getDIType(callable_ty.getArgType(i)));
+
+  return di_builder_.createSubroutineType(
+      di_builder_.getOrCreateTypeArray(EltTys));
+}
 
 void Compiler::CompileDefine(const Define &define) {
   if (const auto *func_body = llvm::dyn_cast<Callable>(&define.getBody())) {
@@ -36,37 +92,18 @@ void Compiler::CompileDefine(const Define &define) {
                                  define.getName(), mod_);
     }
 
+    const SourceLocation &start = define.getStart();
+    llvm::DISubprogram *SP = di_builder_.createFunction(
+        &di_unit_, define.getName(), /*LinkageName=*/"", &di_unit_,
+        start.getRow(), llvm::cast<llvm::DISubroutineType>(getDIType(func_ty)),
+        start.getRow(), llvm::DINode::FlagPrototyped,
+        llvm::DISubprogram::SPFlagDefinition);
+    func->setSubprogram(SP);
+
     // TODO: Maybe getCallable can handle all this?
     assert(!processed_exprs_.contains(func_body));
     processed_exprs_.try_emplace(func_body, func);
-
-    bool return_as_arg = ShouldReturnValueAsArgument(func_ty.getReturnType());
-    if (return_as_arg) {
-      func->getArg(0)->setName("return_val");
-    }
-    for (size_t i = 0; i < func_body->getArgNames().size(); ++i) {
-      func->getArg(i + return_as_arg)->setName(func_body->getArgName(i));
-    }
-
-    // Create the function body.
-    llvm::BasicBlock *bb =
-        llvm::BasicBlock::Create(mod_.getContext(), "entry", func);
-    llvm::IRBuilder<> builder(bb);
-
-    llvm::Value *ret = getExpr(builder, func_body->getBody());
-    if (return_as_arg) {
-      ReplaceAllUsesWith(func->getArg(0), ret);
-      builder.CreateRetVoid();
-    } else {
-      builder.CreateRet(ret);
-    }
-
-    if (llvm::verifyFunction(*func, &llvm::errs())) {
-      mod_.dump();
-      std::cerr << "Function not well-formed" << std::endl;
-      func->print(llvm::errs());
-      __builtin_trap();
-    }
+    FillFuncBody(*func_body, func);
   } else {
     // TODO: Handle non-function definitions.
     __builtin_trap();
@@ -141,19 +178,14 @@ llvm::FunctionType *Compiler::getLLVMFuncType(const CallableType &ty) const {
 
 llvm::Type *Compiler::getLLVMType(const Type &ty) const {
   switch (ty.getKind()) {
-    case Node::NK_NamedType:
+    case Type::TK_NamedType:
       return getLLVMType(llvm::cast<NamedType>(ty));
-    case Node::NK_CompositeType:
+    case Type::TK_CompositeType:
       return getLLVMType(llvm::cast<CompositeType>(ty));
-    case Node::NK_CallableType:
+    case Type::TK_CallableType:
       return getLLVMFuncType(llvm::cast<CallableType>(ty));
-    case Node::NK_ArrayType:
+    case Type::TK_ArrayType:
       return getLLVMType(llvm::cast<ArrayType>(ty));
-#define NODE(name) case Node::NK_##name:
-#define TYPE(name)
-#include "nodes.def"
-      std::cerr << "Unhandled type: " << ty.toString() << std::endl;
-      __builtin_trap();
   }
 }
 
@@ -184,6 +216,8 @@ llvm::Type *Compiler::getLLVMType(const NamedType &type) const {
 
 void Compiler::ReplaceAllUsesWith(llvm::Value *replacement,
                                   llvm::Value *replacing) {
+  if (replacement == replacing) return;
+
   // Do a normal replacement.
   replacing->replaceAllUsesWith(replacement);
 
@@ -199,12 +233,16 @@ void Compiler::ReplaceAllUsesWith(llvm::Value *replacement,
 
 llvm::Value *Compiler::getCallable(llvm::IRBuilder<> &builder,
                                    const Callable &callable) {
-  const Type &ty = callable.getType();
   llvm::FunctionType *llvm_func_ty = getLLVMFuncType(callable.getType());
 
   llvm::Function *func = llvm::Function::Create(
       llvm_func_ty, llvm::Function::ExternalLinkage, "", mod_);
+  FillFuncBody(callable, func);
+  return func;
+}
 
+void Compiler::FillFuncBody(const Callable &callable, llvm::Function *func) {
+  const Type &ty = callable.getType();
   bool return_as_arg = ShouldReturnValueAsArgument(ty.getReturnType());
   if (return_as_arg) {
     func->getArg(0)->setName("return_val");
@@ -226,14 +264,14 @@ llvm::Value *Compiler::getCallable(llvm::IRBuilder<> &builder,
     nested_builder.CreateRet(ret);
   }
 
+  if (auto *SP = func->getSubprogram()) di_builder_.finalizeSubprogram(SP);
+
   if (llvm::verifyFunction(*func, &llvm::errs())) {
     mod_.dump();
     std::cerr << "Function not well-formed" << std::endl;
     func->print(llvm::errs());
     __builtin_trap();
   }
-
-  return func;
 }
 
 llvm::Value *Compiler::getLet(llvm::IRBuilder<> &builder, const Let &let) {
@@ -250,16 +288,16 @@ llvm::Value *Compiler::getKeep(llvm::IRBuilder<> &builder, const Keep &keep) {
 
 std::string Compiler::Mangle(const Type &type) const {
   switch (type.getKind()) {
-    case Node::NK_NamedType:
+    case Type::TK_NamedType:
       return std::string(llvm::cast<NamedType>(type).getName());
-    case Node::NK_ArrayType: {
+    case Type::TK_ArrayType: {
       const auto &array_ty = llvm::cast<ArrayType>(type);
       std::stringstream ss;
       ss << "arr_" << array_ty.getNumElems() << "_"
          << Mangle(array_ty.getElemType());
       return ss.str();
     }
-    case Node::NK_CompositeType: {
+    case Type::TK_CompositeType: {
       const auto &composite_ty = llvm::cast<CompositeType>(type);
       std::stringstream ss;
       ss << "ct";
@@ -268,7 +306,7 @@ std::string Compiler::Mangle(const Type &type) const {
       }
       return ss.str();
     }
-    case Node::NK_CallableType: {
+    case Type::TK_CallableType: {
       const auto &callable_ty = llvm::cast<CallableType>(type);
       std::stringstream ss;
       ss << "ret_" << Mangle(callable_ty.getReturnType());
@@ -277,11 +315,6 @@ std::string Compiler::Mangle(const Type &type) const {
       }
       return ss.str();
     }
-#define NODE(name) case Node::NK_##name:
-#define TYPE(name)
-#include "nodes.def"
-      std::cerr << "Unhandled type: " << type.toString() << std::endl;
-      __builtin_trap();
   }
 }
 
@@ -303,6 +336,11 @@ llvm::Function *Compiler::getCPrintf() const {
 }
 
 llvm::Value *Compiler::getExpr(llvm::IRBuilder<> &builder, const Expr &expr) {
+  llvm::Function *func = builder.GetInsertBlock()->getParent();
+  builder.SetCurrentDebugLocation(
+      llvm::DILocation::get(di_unit_.getContext(), expr.getStart().getRow(),
+                            expr.getStart().getCol(), func->getSubprogram()));
+
   if (llvm::isa<Let>(expr)) return getExprImpl(builder, expr);
 
   auto found = processed_exprs_.find(&expr);
@@ -456,6 +494,11 @@ llvm::Value *Compiler::getIf(llvm::IRBuilder<> &builder, const If &if_expr) {
   func->insert(func->end(), merge_bb);
   builder.SetInsertPoint(merge_bb);
 
+  if (true_expr->getType() != false_expr->getType()) {
+    true_expr->getType()->dump();
+    false_expr->getType()->dump();
+    ASTDumper(if_expr, std::cerr).Dump();
+  }
   assert(true_expr->getType() == false_expr->getType());
   llvm::PHINode *phi = builder.CreatePHI(true_expr->getType(),
                                          /*NumReservedValues=*/2);
@@ -699,7 +742,11 @@ llvm::Value *Compiler::getCall(llvm::IRBuilder<> &builder, const Call &call) {
   llvm::Value *callable = getExpr(builder, call.getFunc());
   llvm::FunctionCallee callee(getLLVMFuncType(call.getFunc()), callable);
 
-  llvm::Value *ret = builder.CreateCall(callee, args);
+  llvm::CallInst *ret = builder.CreateCall(callee, args);
+  llvm::Function *func = builder.GetInsertBlock()->getParent();
+  ret->setDebugLoc(
+      llvm::DILocation::get(di_unit_.getContext(), call.getStart().getRow(),
+                            call.getStart().getCol(), func->getSubprogram()));
   return return_as_arg ? args.front() : ret;
 }
 
@@ -730,17 +777,18 @@ llvm::Value *Compiler::getComposite(llvm::IRBuilder<> &builder,
 }
 
 bool Compile(const std::vector<const Node *> &ast, std::string_view outfile,
-             DumpType dump) {
+             DumpType dump, std::filesystem::path source) {
   std::ofstream out(outfile.data());
   if (!out) {
     std::cerr << "Could not open file " << outfile << std::endl;
     return false;
   }
-  return Compile(ast, out, dump, outfile);
+  return Compile(ast, out, dump, outfile, source);
 }
 
 bool Compile(const std::vector<const Node *> &ast, std::ostream &out,
-             DumpType dump, std::string_view modname) {
+             DumpType dump, std::string_view modname,
+             std::filesystem::path source) {
 #if HAS_LSAN
   // lsab with libLLVM-16 is reporting leaks from within llvm internals.
   __lsan::ScopedDisabler disable;
@@ -785,7 +833,7 @@ bool Compile(const std::vector<const Node *> &ast, std::ostream &out,
   mod.setDataLayout(TheTargetMachine->createDataLayout());
 
   std::vector<std::unique_ptr<Node>> gc;
-  Compiler compiler(mod);
+  Compiler compiler(mod, source);
 
   for (const auto *node : ast) {
     if (const auto *def = llvm::dyn_cast<Define>(node))
@@ -797,6 +845,8 @@ bool Compile(const std::vector<const Node *> &ast, std::ostream &out,
       __builtin_trap();
     }
   }
+
+  compiler.getDIBuilder().finalize();
 
   // Create the analysis managers.
   llvm::LoopAnalysisManager LAM;

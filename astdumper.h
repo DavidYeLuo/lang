@@ -21,7 +21,6 @@ class ASTDumper {
  private:
   void Dump(const Node &node);
 #define NODE(name) void Dump(const name &);
-#define TYPE(name)
 #include "nodes.def"
 
   std::ostream &Pad();

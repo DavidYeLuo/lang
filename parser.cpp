@@ -66,30 +66,32 @@ bool IsBuiltinType(std::string_view name) {
          name == builtins::kCPtrTypeName || name == builtins::kNoneTypeName;
 }
 
+bool Type::isBuiltinType() const {
+  if (const auto *named_ty = llvm::dyn_cast<NamedType>(this))
+    return IsBuiltinType(named_ty->getName());
+  return false;
+}
+
 const NamedType &ASTBuilder::getNamedType(std::string_view name) {
   auto found = named_types_.find(name);
   if (found != named_types_.end()) return *found->second;
 
   const NamedType *ptr = new NamedType(name);
-  nodes_.emplace_back(ptr);
+  types_.emplace_back(ptr);
   named_types_[std::string(name)] = ptr;
   return *ptr;
 }
 
 bool ASTBuilder::Equals(const Type &lhs, const Type &rhs) const {
   switch (lhs.getKind()) {
-    case Node::NK_NamedType:
+    case Type::TK_NamedType:
       return Equals(llvm::cast<NamedType>(lhs), rhs);
-    case Node::NK_CallableType:
+    case Type::TK_CallableType:
       return Equals(llvm::cast<CallableType>(lhs), rhs);
-    case Node::NK_CompositeType:
+    case Type::TK_CompositeType:
       return Equals(llvm::cast<CompositeType>(lhs), rhs);
-    case Node::NK_ArrayType:
+    case Type::TK_ArrayType:
       return Equals(llvm::cast<ArrayType>(lhs), rhs);
-#define NODE(name) case Node::NK_##name:
-#define TYPE(name)
-#include "nodes.def"
-      __builtin_trap();
   }
 }
 
@@ -161,6 +163,9 @@ Result<const Parser::AST> Parser::Parse() {
 }
 
 Result<const Define *> Parser::ParseDefineImpl() {
+  auto peek = lexer_.Peek();
+  SourceLocation def_loc = peek->getStart();
+
   Consume(Token::TK_Def);
 
   Result<Token> res = lexer_.Lex();
@@ -187,12 +192,15 @@ Result<const Define *> Parser::ParseDefineImpl() {
       ParseCallable(/*hint=*/nullptr, &name_ref);
   if (!callable_res) return callable_res;
 
-  const Define &define = builder_.getDefine(name, *callable_res.get());
+  const Define &define = builder_.getDefine(def_loc, name, *callable_res.get());
   return &define;
 }
 
 // <decl> ::= "decl" <identifier> "=" <type>
 Result<const Declare *> Parser::ParseDeclareImpl() {
+  auto decl_tok = lexer_.Peek();
+  SourceLocation decl_loc = decl_tok->getStart();
+
   Consume(Token::TK_Decl);
   Result<Token> tok = lexer_.Lex();
   if (!tok) return tok;
@@ -214,7 +222,7 @@ Result<const Declare *> Parser::ParseDeclareImpl() {
   Result<const Type *> type = ParseType();
   if (!type) return type;
 
-  const Declare &decl = builder_.getDeclare(name, *type.get());
+  const Declare &decl = builder_.getDeclare(decl_loc, name, *type.get());
   RegisterGlobalVar(name, decl);
   return &decl;
 }
@@ -229,12 +237,15 @@ Result<const Callable *> Parser::ParseCallable(
            << res->getStart() << ": Expected lambda start `\\`; instead found `"
            << res->getChars() << "`";
 
+  SourceLocation callable_loc = res->getStart();
+
   // Maybe parse arguments.
   res = lexer_.Peek();
   if (!res) return res;
 
   std::vector<std::string> arg_names;
   std::vector<const Type *> arg_types;
+  std::vector<SourceLocation> arg_locs;
   while (res->getKind() != Token::TK_Arrow) {
     // Parse one argument (a type and an identifier).
     Result<const Type *> type_res = ParseType();
@@ -254,6 +265,7 @@ Result<const Callable *> Parser::ParseCallable(
 
     arg_names.emplace_back(name);
     arg_types.push_back(&type);
+    arg_locs.push_back(res->getStart());
 
     // Finished processing one argument. Check for the ending -> or continue
     // parsing more arguments.
@@ -274,7 +286,7 @@ Result<const Callable *> Parser::ParseCallable(
   Result<const Callable *> callable_res;
 
   const Callable &callable = builder_.getCallable(
-      *type_res.get(), arg_names, arg_types,
+      callable_loc, *type_res.get(), arg_locs, arg_names, arg_types,
       // NOTE: This lambda needs to explicitly set the return type as a
       // reference, otherwise the deduced argument could be a non-reference copy
       // and result in an eventual stack-use-after-return.
@@ -446,16 +458,18 @@ Result<const Expr *> Parser::ParseExprImpl(const Type *hint) {
 
   if (res->isBinOpKind()) return ParseBinOp(hint);
 
+  SourceLocation expr_loc = res->getStart();
+
   if (res->getKind() == Token::TK_True) {
     Consume(Token::TK_True);
-    return &builder_.getBool(true);
+    return &builder_.getBool(expr_loc, true);
   }
   if (res->getKind() == Token::TK_False) {
     Consume(Token::TK_False);
-    return &builder_.getBool(false);
+    return &builder_.getBool(expr_loc, false);
   }
 
-  return getDiag<const Expr *>(res->getStart())
+  return getDiag<const Expr *>(expr_loc)
          << "Unable to parse expression starting with `" << res->getChars()
          << "`";
 }
@@ -509,6 +523,8 @@ Result<const If *> Parser::ParseIf(const Type *hint) {
   Result<Token> if_tok = lexer_.Lex();
   assert(if_tok->isa(Token::TK_If));
 
+  SourceLocation if_loc = if_tok->getStart();
+
   Result<Token> cond_expr_tok = lexer_.Peek();
 
   Result<const Expr *> cond = ParseExpr();
@@ -516,9 +532,8 @@ Result<const If *> Parser::ParseIf(const Type *hint) {
 
   const Type &type = (*cond)->getType();
   if (!type.isNamedType("bool"))
-    return Result<const If *>::BuildError()
-           << cond_expr_tok->getStart()
-           << ": Expected `bool` type for if condition expression; instead "
+    return getDiag<const If *>(cond_expr_tok->getStart())
+           << "Expected `bool` type for if condition expression; instead "
               "found `"
            << type.toString() << "`";
 
@@ -528,17 +543,40 @@ Result<const If *> Parser::ParseIf(const Type *hint) {
   Result<Token> res = lexer_.Lex();
   if (!res) return res;
   if (!res->isa(Token::TK_Else))
-    return Result<const If *>::BuildError()
-           << res->getStart() << ": Expected `else` for if starting at "
-           << if_tok->getStart() << "; instead found `" << res->getChars()
-           << "`";
+    return getDiag<const If *>(res->getStart())
+           << "Expected `else` for if starting at " << if_tok->getStart()
+           << "; instead found `" << res->getChars() << "`";
 
   Result<const Expr *> else_body = ParseExpr();
   if (!else_body) return else_body;
 
-  // TODO: Check against the type hint here.
+  if (!builder_.Equals((*if_body)->getType(), (*else_body)->getType())) {
+    return getDiag<const If *>(if_tok->getStart())
+           << "Mismatch type between if and else expressions; if expression "
+              "has type "
+           << (*if_body)->getType().toString()
+           << " but else expression has type "
+           << (*else_body)->getType().toString();
+  }
 
-  return &builder_.getIf(*cond.get(), *if_body.get(), *else_body.get());
+  if (hint) {
+    if (!builder_.Equals((*if_body)->getType(), *hint)) {
+      return getDiag<const If *>(if_tok->getStart())
+             << "Mismatch type between if body and expected type; if body has "
+                "type "
+             << (*if_body)->getType().toString() << " but expected type "
+             << hint->toString();
+    }
+    if (!builder_.Equals((*else_body)->getType(), *hint)) {
+      return getDiag<const If *>(if_tok->getStart())
+             << "Mismatch type between else body and expected type; else body "
+                "has type "
+             << (*else_body)->getType().toString() << " but expected type "
+             << hint->toString();
+    }
+  }
+
+  return &builder_.getIf(if_loc, *cond.get(), *if_body.get(), *else_body.get());
 }
 
 // <keep> ::= "keep" <identifier> "=" <type> <expr> <body>
@@ -546,6 +584,8 @@ Result<const If *> Parser::ParseIf(const Type *hint) {
 // This is similar to a Let except the body is retained in the node itself, so a
 // Keep will always be retained in the AST.
 Result<const Keep *> Parser::ParseKeep(const Type *hint) {
+  auto keep_tok = lexer_.Peek();
+  SourceLocation keep_loc = keep_tok->getStart();
   Consume(Token::TK_Keep);
 
   Result<Token> res = lexer_.Lex();
@@ -557,6 +597,10 @@ Result<const Keep *> Parser::ParseKeep(const Type *hint) {
            << "`";
 
   std::string_view name(res->getChars());
+  if (HasVar(name)) {
+    return getDiag<const Keep *>(res->getStart())
+           << "Variable name `" << name << "` is already defined prior";
+  }
 
   Consume(Token::TK_Assign);
 
@@ -571,11 +615,13 @@ Result<const Keep *> Parser::ParseKeep(const Type *hint) {
   Result<const Expr *> body_res = ParseExpr(hint);
   if (!body_res) return body_res;
 
-  return &builder_.getKeep(name, **expr_res, **body_res);
+  return &builder_.getKeep(keep_loc, name, **expr_res, **body_res);
 }
 
 // <let> ::= "let" <identifier> "=" <type> <expr> <body>
 Result<const Expr *> Parser::ParseLet(const Type *hint) {
+  auto let_tok = lexer_.Peek();
+  SourceLocation let_loc = let_tok->getStart();
   Consume(Token::TK_Let);
 
   Result<Token> res = lexer_.Lex();
@@ -587,6 +633,10 @@ Result<const Expr *> Parser::ParseLet(const Type *hint) {
            << "`";
 
   std::string_view name(res->getChars());
+  if (HasVar(name)) {
+    return getDiag<const Expr *>(res->getStart())
+           << "Variable name `" << name << "` is already defined prior";
+  }
 
   Consume(Token::TK_Assign);
 
@@ -596,7 +646,7 @@ Result<const Expr *> Parser::ParseLet(const Type *hint) {
   Result<const Expr *> expr_res = ParseExpr(type_res.get());
   if (!expr_res) return expr_res;
 
-  const Let &let = builder_.getLet(name, *expr_res.get());
+  const Let &let = builder_.getLet(let_loc, name, *expr_res.get());
   RegisterLocalVar(name, let);
 
   Result<const Expr *> body_res = ParseExpr(hint);
@@ -611,7 +661,7 @@ Result<const Expr *> Parser::ParseIdentifier(const Type *hint) {
 
   std::string_view name(res->getChars());
   if (!HasVar(name))
-    return Result<const Expr *>::Diagnostic(lexer_.getInput(), res->getStart())
+    return getDiag<const Expr *>(res->getStart())
            << "Unknown variable `" << name << "`";
 
   // TODO: Compare the type against the hint if provided.
@@ -659,13 +709,18 @@ Result<std::vector<const Expr *>> Parser::ParseCallArguments(
   return args;
 }
 
-Result<const Call *> Parser::ParseCall(const Type *hint) {
+Result<const Call *> Parser::ParseCall(const Type *return_type_hint) {
   Result<Token> tok = lexer_.Lex();
+  SourceLocation call_loc = tok->getStart();
+
   assert(tok && (tok->isa(Token::TK_Call) || tok->isa(Token::TK_ImpureCall)));
+
   bool pure = tok->isa(Token::TK_Call);
 
   Result<Token> res = lexer_.Peek();
   if (!res) return res;
+
+  SourceLocation func_loc = res->getStart();
 
   if (res->getKind() == Token::TK_Write) {
     // Before we actually create the callee expression, attempt to deduce the
@@ -680,16 +735,38 @@ Result<const Call *> Parser::ParseCall(const Type *hint) {
     lexer_.Lex();
 
     if (args->size() != 2)
-      return Result<const Call *>::BuildError()
-             << res->getStart()
-             << ": Expected `write` to have 2 arguments; instead found "
+      return getDiag<const Call *>(res->getStart())
+             << "Expected `write` to have 2 arguments; instead found "
              << args->size();
 
-    // TODO: Check the `write` argument types.
-    // TODO: Check against the type hint here.
+    if (!args->at(0)->getType().isNamedType(builtins::kIOTypeName)) {
+      return getDiag<const Call *>(res->getStart())
+             << "Expected the first argument of a `write` to be an IO type; "
+                "instead found "
+             << args->at(0)->getType().toString();
+    }
 
-    const Write &write = builder_.getWrite(args->at(1)->getType());
-    return &builder_.getCall(write, args.get(), pure);
+    const Type &arg_ty = args->at(1)->getType();
+    if (!arg_ty.isBuiltinType() && !arg_ty.isCharArray()) {
+      return getDiag<const Call *>(res->getStart())
+             << "Expected the second argument of a `write` to be an builtin "
+                "type or char array; instead found "
+             << arg_ty.toString();
+    }
+
+    const Write &write = builder_.getWrite(func_loc, args->at(1)->getType());
+    if (return_type_hint) {
+      assert(return_type_hint->isNamedType(builtins::kIOTypeName));
+      if (!builder_.Equals(write.getType().getReturnType(),
+                           *return_type_hint)) {
+        return getDiag<const Call *>(res->getStart())
+               << "Mismatch between type hint and actual type; expected "
+               << return_type_hint->toString() << " but found "
+               << write.getType().getReturnType().toString();
+      }
+    }
+
+    return &builder_.getCall(call_loc, write, args.get(), pure);
   } else {
     SourceLocation callable_loc = res->getStart();
 
@@ -719,11 +796,12 @@ Result<const Call *> Parser::ParseCall(const Type *hint) {
              << (*callable)->getType().toString();
     }
 
-    if (hint && !builder_.Equals(actual_ty->getReturnType(), *hint)) {
+    if (return_type_hint &&
+        !builder_.Equals(actual_ty->getReturnType(), *return_type_hint)) {
       return getDiag<const Call *>(callable_loc)
              << "Return type mismatch for call; found "
              << actual_ty->getReturnType().toString() << " but expected "
-             << hint->toString();
+             << return_type_hint->toString();
     }
 
     if (actual_ty->getNumArgs() != args->size()) {
@@ -741,7 +819,7 @@ Result<const Call *> Parser::ParseCall(const Type *hint) {
       }
     }
 
-    return &builder_.getCall(*callable.get(), args.get(), pure);
+    return &builder_.getCall(call_loc, *callable.get(), args.get(), pure);
   }
 }
 
@@ -751,7 +829,8 @@ Result<const Int *> Parser::ParseInt() {
 
   assert(res->isa(Token::TK_Int));
 
-  return &builder_.getInt(std::stoi(std::string(res->getChars())));
+  return &builder_.getInt(res->getStart(),
+                          std::stoi(std::string(res->getChars())));
 }
 
 Result<const Char *> Parser::ParseChar() {
@@ -760,7 +839,7 @@ Result<const Char *> Parser::ParseChar() {
   assert(res->getChars().size() == 3 && res->getChars().front() == '\'' &&
          res->getChars().back() == '\'');
 
-  return &builder_.getChar(res->getChars().at(1));
+  return &builder_.getChar(res->getStart(), res->getChars().at(1));
 }
 
 Result<const Str *> Parser::ParseStr() {
@@ -776,12 +855,13 @@ Result<const Str *> Parser::ParseStr() {
   assert(chars.front() == '"' && chars.back() == '"');
   assert(chars.size() >= 2);
 
-  return &builder_.getStr(chars.substr(1, chars.size() - 2));
+  return &builder_.getStr(res->getStart(), chars.substr(1, chars.size() - 2));
 }
 
 Result<const Readc *> Parser::ParseReadc() {
+  SourceLocation loc = lexer_.Peek()->getStart();
   Consume(Token::TK_Readc);
-  return &builder_.getReadc();
+  return &builder_.getReadc(loc);
 }
 
 Result<const Zero *> Parser::ParseZero(const Type *hint) {
@@ -789,8 +869,9 @@ Result<const Zero *> Parser::ParseZero(const Type *hint) {
     return getDiag<const Zero *>(lexer_.getCurrentLoc())
            << "Unable to determine type of `zero`";
   }
+  SourceLocation loc = lexer_.Peek()->getStart();
   Consume(Token::TK_Zero);
-  return &builder_.getZero(*hint);
+  return &builder_.getZero(loc, *hint);
 }
 
 Result<const Write *> Parser::ParseWrite(const Type *hint) {
@@ -798,6 +879,7 @@ Result<const Write *> Parser::ParseWrite(const Type *hint) {
   if (!res) return res;
 
   assert(res->isa(Token::TK_Write));
+  SourceLocation loc = res->getStart();
 
   if (!hint) {
     return Result<const Write *>::BuildError()
@@ -822,11 +904,12 @@ Result<const Write *> Parser::ParseWrite(const Type *hint) {
            << hint->toString() << "`";
   }
 
-  return &builder_.getWrite(callable_ty->getArgType(1));
+  return &builder_.getWrite(loc, callable_ty->getArgType(1));
 }
 
 // <composite> ::= "<" <expr>+ ">"
 Result<const Composite *> Parser::ParseComposite() {
+  SourceLocation loc = lexer_.Peek()->getStart();
   Consume(Token::TK_LAngleBrack);
 
   std::vector<const Expr *> elems;
@@ -844,7 +927,7 @@ Result<const Composite *> Parser::ParseComposite() {
 
   Consume(Token::TK_RAngleBrack);
 
-  return &builder_.getComposite(elems);
+  return &builder_.getComposite(loc, elems);
 }
 
 // <set> ::= "SET" <expr> <expr> <expr>
@@ -852,6 +935,7 @@ Result<const Composite *> Parser::ParseComposite() {
 // The first <expr> is the composite type being accessed. The second <expr> is
 // the index. The third <expr> is the value being stored.
 Result<const Set *> Parser::ParseSet() {
+  SourceLocation loc = lexer_.Peek()->getStart();
   Consume(Token::TK_SET);
 
   auto peek = lexer_.Peek();
@@ -881,7 +965,7 @@ Result<const Set *> Parser::ParseSet() {
   Result<const Expr *> store_val = ParseExpr();
   if (!store_val) return store_val;
 
-  return &builder_.getSet(**composite, **idx, **store_val);
+  return &builder_.getSet(loc, **composite, **idx, **store_val);
 }
 
 // <get> ::= "GET" <type> <expr> <expr>
@@ -889,6 +973,7 @@ Result<const Set *> Parser::ParseSet() {
 // The <type> is the resulting type of the GET expression. The first <expr> is
 // the composite type that is being accessed. The second <expr> is the index.
 Result<const Get *> Parser::ParseGet() {
+  SourceLocation loc = lexer_.Peek()->getStart();
   Consume(Token::TK_GET);
 
   Result<Token> peek = lexer_.Peek();
@@ -950,16 +1035,15 @@ Result<const Get *> Parser::ParseGet() {
            << (*idx)->getType().toString() << "`";
   }
 
-  return &builder_.getGet(type, **expr, **idx);
+  return &builder_.getGet(loc, type, **expr, **idx);
 }
 
 // <cast> ::= "CAST" <type> <expr>
 Result<const Cast *> Parser::ParseCast() {
+  SourceLocation loc = lexer_.Peek()->getStart();
   Consume(Token::TK_CAST);
   Result<const Type *> type = ParseType();
   if (!type) return type;
-
-  SourceLocation loc = lexer_.getCurrentLoc();
 
   Result<const Expr *> expr = ParseExpr();
   if (!expr) return expr;
@@ -985,7 +1069,7 @@ Result<const Cast *> Parser::ParseCast() {
     std::cerr << warn.get() << std::endl;
   }
 
-  return &builder_.getCast(**type, **expr);
+  return &builder_.getCast(loc, **type, **expr);
 }
 
 }  // namespace lang

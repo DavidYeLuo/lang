@@ -1,0 +1,20 @@
+#ifndef TYPE
+#define TYPE(name)
+#endif
+
+#ifndef TYPE_FIRST
+#define TYPE_FIRST(name) TYPE(name)
+#endif
+
+#ifndef TYPE_LAST
+#define TYPE_LAST(name) TYPE(name)
+#endif
+
+TYPE_FIRST(NamedType)
+TYPE(CompositeType)
+TYPE(ArrayType)
+TYPE_LAST(CallableType)
+
+#undef TYPE
+#undef TYPE_LAST
+#undef TYPE_FIRST

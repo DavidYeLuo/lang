@@ -43,12 +43,12 @@ int main(int argc, char **argv) {
   std::string outname;
   if (auto output = argparser.get("output")) {
     if (std::string_view(*output) == "-") {
-      return Compile(*maybe_ast, std::cout, mode, /*modname=*/"") ? 0 : 1;
+      return Compile(*maybe_ast, std::cout, mode, /*modname=*/"", *f) ? 0 : 1;
     }
 
     outname.append(*output);
   } else {
     outname.append(*f).append(".obj");
   }
-  return Compile(*maybe_ast, outname, mode) ? 0 : 1;
+  return Compile(*maybe_ast, outname, mode, *f) ? 0 : 1;
 }

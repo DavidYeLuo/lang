@@ -18,11 +18,7 @@ void ASTDumper::Dump(const Node &node) {
 #define NODE(name)      \
   case Node::NK_##name: \
     return Dump(llvm::cast<name>(node));
-#define TYPE(name)      \
-  case Node::NK_##name: \
-    __builtin_trap();
 #include "nodes.def"
-#define TYPE(name)
   }
 }
 

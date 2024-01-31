@@ -66,7 +66,7 @@ void BuildAndCheckOutput(const std::vector<const lang::Node *> &ast,
                          std::string *in_text = nullptr) {
   constexpr std::string_view kOut = "a.out";
   TmpFile obj_file;
-  lang::Compile(ast, obj_file.getPath(), lang::File);
+  ASSERT_TRUE(lang::Compile(ast, obj_file.getPath(), lang::File));
   ASSERT_EQ(RunCommand(std::format("clang {} -o {}", obj_file.getPath(), kOut)),
             0);
 
@@ -174,6 +174,10 @@ class LangCompilerE2E : public testing::Test {
 
  protected:
   void SetUp() override {
+    // The second stage compiler creates an object file called obj.obj. We will
+    // use the second stage to create this, so let's delete it first.
+    std::filesystem::remove("obj.obj");
+
     ASSERT_EQ(RunCommand("./lang examples/compiler.lang"), 0);
     ASSERT_EQ(
         RunCommand(std::format("clang examples/compiler.lang.obj $(llvm-config "
@@ -189,8 +193,17 @@ TEST_F(LangCompilerE2E, HelloWorld) {
   std::stringstream buffer;
   buffer << t.rdbuf();
   std::string in(buffer.str());
+
+  // This creates an object file called obj.obj.
   ASSERT_EQ(
       RunCommand(kLangCompilerName, /*out=*/nullptr, /*err=*/nullptr, &in), 0);
+  ASSERT_EQ(RunCommand("clang obj.obj -o hello-world.out"), 0);
+  std::string out;
+
+  // TODO: Right now, the executable return value is meaningless, so ignore it
+  // for now, but we should check it in the future.
+  RunCommand("./hello-world.out", &out);
+  ASSERT_EQ(out, "Hello world\n");
 }
 
 TEST(E2E, HelloWorldLet) {
@@ -413,124 +426,16 @@ TEST(E2E, HelloWorldWithComments) {
   BuildAndCheckOutput(input, "Hello world\n");
 }
 
-TEST(ASTBuilder, HelloWorld) {
-  lang::ASTBuilder builder;
-
-  const lang::Str &str = builder.getStr("Hello world\n");
-  const lang::Write &write = builder.getWrite(str.getType());
-  const lang::Callable &body = builder.getCallable(
-      {"io"}, {&builder.getIOType()},
-      // NOTE: This lambda needs to explicitly set the return type as a
-      // reference, otherwise the deduced argument could be a non-reference copy
-      // and result in an eventual stack-use-after-return.
-      [&](const std::vector<const lang::Arg *> &args) -> const lang::Expr & {
-        return builder.getCall(write, {args[0], &str});
-      });
-  const lang::Define &define = builder.getDefine("main", body);
-  std::vector<const lang::Node *> ast{&define};
-
-  BuildAndCheckOutput(ast, "Hello world\n");
-}
-
-TEST(ASTBuilder, HelloWorldLet) {
-  lang::ASTBuilder builder;
-
-  const lang::Str &str = builder.getStr("Hello world\n");
-  const lang::Write &write = builder.getWrite(str.getType());
-  const lang::Let &let = builder.getLet("write_alias", write);
-  const lang::Callable &body = builder.getCallable(
-      {"io"}, {&builder.getIOType()},
-      [&](const std::vector<const lang::Arg *> &args) -> const lang::Expr & {
-        return builder.getCall(let, {args[0], &str});
-      });
-  const lang::Define &define = builder.getDefine("main", body);
-  std::vector<const lang::Node *> ast{&define};
-
-  BuildAndCheckOutput(ast, "Hello world\n");
-}
-
-TEST(ASTBuilder, WriteInt) {
-  lang::ASTBuilder builder;
-
-  const lang::Int &i = builder.getInt(5);
-  const lang::Write &write = builder.getWrite(i.getType());
-  const lang::Callable &body = builder.getCallable(
-      {"io"}, {&builder.getIOType()},
-      [&](const std::vector<const lang::Arg *> &args) -> const lang::Expr & {
-        return builder.getCall(write, {args[0], &i});
-      });
-  const lang::Define &define = builder.getDefine("main", body);
-  std::vector<const lang::Node *> ast{&define};
-
-  BuildAndCheckOutput(ast, "5");
-}
-
-TEST(ASTBuilder, If) {
-  lang::ASTBuilder builder;
-
-  auto getAST = [&](bool b) {
-    const lang::Bool &cond = builder.getBool(b);
-    const lang::Int &true_body = builder.getInt(5);
-    const lang::Int &false_body = builder.getInt(6);
-    const lang::If &if_expr = builder.getIf(cond, true_body, false_body);
-
-    const lang::Write &write = builder.getWrite(if_expr.getType());
-    const lang::Callable &body = builder.getCallable(
-        {"io"}, {&builder.getIOType()},
-        [&](const std::vector<const lang::Arg *> &args) -> const lang::Expr & {
-          return builder.getCall(write, {args[0], &if_expr});
-        });
-    const lang::Define &define = builder.getDefine("main", body);
-    std::vector<const lang::Node *> ast{&define};
-    return ast;
-  };
-
-  BuildAndCheckOutput(getAST(true), "5");
-  BuildAndCheckOutput(getAST(false), "6");
-}
-
-TEST(ASTBuilder, Fib) {
-  lang::ASTBuilder builder;
-
-  const lang::Callable &fib_body = builder.getCallable(
-      builder.getIntType(), {"i"}, {&builder.getIntType()},
-      [&](const lang::CallableBase &fib_func,
-          const std::vector<const lang::Arg *> &args) -> const lang::Expr & {
-        // if n < 2
-        const lang::BinOp &lt =
-            builder.getBinOp(*args[0], builder.getInt(2), lang::BinOp::OK_Lt);
-
-        // fib(n-1)
-        const lang::BinOp &sub1 =
-            builder.getBinOp(*args[0], builder.getInt(1), lang::BinOp::OK_Sub);
-        const lang::Call &fib1 = builder.getCall(fib_func, {&sub1});
-
-        // fib(n-2)
-        const lang::BinOp &sub2 =
-            builder.getBinOp(*args[0], builder.getInt(2), lang::BinOp::OK_Sub);
-        const lang::Call &fib2 = builder.getCall(fib_func, {&sub2});
-
-        // fib(n-1) + fib(n-2)
-        const lang::BinOp &add =
-            builder.getBinOp(fib1, fib2, lang::BinOp::OK_Add);
-
-        const lang::If &if_expr = builder.getIf(lt, *args[0], add);
-        return if_expr;
-      });
-
-  const lang::Callable &body = builder.getCallable(
-      {"io"}, {&builder.getIOType()},
-      [&](const std::vector<const lang::Arg *> &args) -> const lang::Expr & {
-        // Call fib(10) which should be 55.
-        const lang::Call &call_fib =
-            builder.getCall(fib_body, {&builder.getInt(10)});
-        const lang::Write &write = builder.getWrite(call_fib.getType());
-        return builder.getCall(write, {args[0], &call_fib});
-      });
-  const lang::Define &define = builder.getDefine("main", body);
-  std::vector<const lang::Node *> ast{&define};
-
-  BuildAndCheckOutput(ast, "55");
+TEST(RegressionTests, Regression1) {
+  // Assert we can compile this normally. Prior, this would hang infinitely in
+  // doRAU when replacing a value with itself.
+  std::ifstream input("examples/regression-test-1.lang");
+  lang::Lexer lexer(input);
+  lang::Parser parser(lexer);
+  auto maybe_ast = parser.Parse();
+  ASSERT_FALSE(maybe_ast.hasError()) << maybe_ast.getError();
+  TmpFile obj_file;
+  ASSERT_TRUE(lang::Compile(*maybe_ast, obj_file.getPath(), lang::File));
 }
 
 }  // namespace

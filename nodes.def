@@ -14,18 +14,6 @@
 #define EXPR_LAST(name) EXPR(name)
 #endif
 
-#ifndef TYPE
-#define TYPE(name) NODE(name)
-#endif
-
-#ifndef TYPE_FIRST
-#define TYPE_FIRST(name) TYPE(name)
-#endif
-
-#ifndef TYPE_LAST
-#define TYPE_LAST(name) TYPE(name)
-#endif
-
 NODE(Define)
 
 EXPR_FIRST(Write)
@@ -49,14 +37,6 @@ EXPR(Bool)
 EXPR(Char)
 EXPR_LAST(Str)
 
-TYPE_FIRST(NamedType)
-TYPE(CompositeType)
-TYPE(ArrayType)
-TYPE_LAST(CallableType)
-
-#undef TYPE
-#undef TYPE_LAST
-#undef TYPE_FIRST
 #undef EXPR
 #undef EXPR_LAST
 #undef EXPR_FIRST

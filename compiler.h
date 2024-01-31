@@ -1,6 +1,7 @@
 #ifndef COMPILER_H_
 #define COMPILER_H_
 
+#include <filesystem>
 #include <functional>
 #include <ostream>
 #include <sstream>
@@ -9,6 +10,7 @@
 #include "ast.h"
 #include "llvm/Analysis/CGSCCPassManager.h"
 #include "llvm/Analysis/LoopAnalysisManager.h"
+#include "llvm/IR/DIBuilder.h"
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/LegacyPassManager.h"
@@ -34,7 +36,23 @@ enum DumpType {
 
 class Compiler {
  public:
-  Compiler(llvm::Module &mod) : mod_(mod) {}
+  Compiler(llvm::Module &mod) : Compiler(mod, "") {}
+
+  Compiler(llvm::Module &mod, std::filesystem::path source_path)
+      : mod_(mod),
+        di_builder_(mod),
+        di_unit_(
+            source_path.empty()
+                ? *di_builder_.createFile(/*Filename=*/"<input>",
+                                          /*Direcory=*/".")
+                : *di_builder_.createFile(source_path.filename().c_str(),
+                                          source_path.parent_path().c_str())),
+        di_cu_(*di_builder_.createCompileUnit(
+            llvm::dwarf::DW_LANG_C, &di_unit_,
+            /*Producer=*/"Lang Compiler", /*isOptimized=*/false, /*Flags=*/"",
+            /*RuntimeVersion=*/0)) {}
+
+  llvm::DIBuilder &getDIBuilder() { return di_builder_; }
 
   void CompileDefine(const Define &define);
   void CompileDeclare(const Declare &declare);
@@ -112,16 +130,34 @@ class Compiler {
   void DoStore(llvm::IRBuilder<> &builder, llvm::Value *store_ptr,
                const Expr &expr);
 
+  void FillFuncBody(const Callable &callable, llvm::Function *func);
+
+  // llvm::DISubroutineType *CreateFunctionType(size_t num_args);
+  llvm::DIType *getDIType(const Type &type) {
+    switch (type.getKind()) {
+#define TYPE(name)      \
+  case Type::TK_##name: \
+    return getDIType(llvm::cast<name>(type));
+#include "types.def"
+    }
+  }
+#define TYPE(name) llvm::DIType *getDIType(const name &);
+#include "types.def"
+
   llvm::Module &mod_;
   std::unique_ptr<NamedType> io_type_;
   std::unique_ptr<NamedType> str_type_;
   std::map<const Node *, llvm::Value *> processed_exprs_;
+  llvm::DIBuilder di_builder_;
+  llvm::DIFile &di_unit_;
+  llvm::DICompileUnit &di_cu_;
 };
 
 bool Compile(const std::vector<const Node *> &ast, std::string_view outfile,
-             DumpType dump);
+             DumpType dump, std::filesystem::path source = "");
 bool Compile(const std::vector<const Node *> &ast, std::ostream &out,
-             DumpType dump, std::string_view modname);
+             DumpType dump, std::string_view modname,
+             std::filesystem::path source = "");
 
 }  // namespace lang
 
