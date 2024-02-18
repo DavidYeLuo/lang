@@ -1,9 +1,8 @@
 #include "lexer.h"
 
-#include <assert.h>
-#include <ctype.h>
-
 #include <algorithm>
+#include <cassert>
+#include <cctype>
 
 #include "lang.h"
 
@@ -36,14 +35,16 @@ Result<Token> Lexer::LexImpl() {
   // Skip over individual things.
   while (1) {
     // Check for EOF.
-    if (ch == EOF) return Result<Token>(Token::TK_EOF, start, start, "");
+    if (ch == EOF)
+      return Result<Token>(Token::TK_EOF, start, start, "");
 
     // Check for WS.
     if (isspace(ch)) {
       while (isspace(ch)) {
         getNextChar();
         ch = PeekNextChar(start);
-        if (ch == EOF) return Result<Token>(Token::TK_EOF, start, start, "");
+        if (ch == EOF)
+          return Result<Token>(Token::TK_EOF, start, start, "");
       }
       continue;
     }
@@ -54,7 +55,8 @@ Result<Token> Lexer::LexImpl() {
       while (ch != '\n') {
         getNextChar();
         ch = PeekNextChar(start);
-        if (ch == EOF) return Result<Token>(Token::TK_EOF, start, start, "");
+        if (ch == EOF)
+          return Result<Token>(Token::TK_EOF, start, start, "");
       }
       ConsumeChar('\n');
       ch = PeekNextChar(start);
@@ -89,12 +91,17 @@ Result<Token> Lexer::LexImpl() {
     case ']':
       return Result<Token>(Token::TK_RSqBrack, start,
                            SourceLocation(row_, col_ + 1, next_pos), "]");
+    case '(':
+      return Result<Token>(Token::TK_LParen, start,
+                           SourceLocation(row_, col_ + 1, next_pos), "(");
+    case ')':
+      return Result<Token>(Token::TK_RParen, start,
+                           SourceLocation(row_, col_ + 1, next_pos), ")");
     case '-': {
       char next = getNextChar();
       if (next != '>')
-        return Result<Token>::BuildError()
-               << start << ": Expected `->`; " << " instead found `-" << next
-               << "`";
+        return Diagnostic(input_, start)
+               << "Expected `->`; " << " instead found `-" << next << "`";
       return Result<Token>(Token::TK_Arrow, start,
                            SourceLocation(row_, col_ + 1, next_pos), "->");
     }
@@ -134,7 +141,7 @@ Result<Token> Lexer::LexImpl() {
       buff += ch;
       ch = getNextChar();
       if (ch != '\'')
-        return Result<Token>::Diagnostic(input_, start)
+        return Diagnostic(input_, start)
                << "Expected char literal to end with closing `'`; "
                << " instead found `" << ch << "`";
       buff += ch;
@@ -158,32 +165,55 @@ Result<Token> Lexer::LexImpl() {
   SourceLocation end;
   PeekNextChar(end);
 
-  if (buff == "def") return Result<Token>(Token::TK_Def, start, end, buff);
-  if (buff == "decl") return Result<Token>(Token::TK_Decl, start, end, buff);
-  if (buff == "call") return Result<Token>(Token::TK_Call, start, end, buff);
+  if (buff == "def")
+    return Result<Token>(Token::TK_Def, start, end, buff);
+  if (buff == "decl")
+    return Result<Token>(Token::TK_Decl, start, end, buff);
+  if (buff == "call")
+    return Result<Token>(Token::TK_Call, start, end, buff);
   if (buff == "impurecall")
     return Result<Token>(Token::TK_ImpureCall, start, end, buff);
-  if (buff == "write") return Result<Token>(Token::TK_Write, start, end, buff);
-  if (buff == "readc") return Result<Token>(Token::TK_Readc, start, end, buff);
-  if (buff == "end") return Result<Token>(Token::TK_End, start, end, buff);
-  if (buff == "let") return Result<Token>(Token::TK_Let, start, end, buff);
-  if (buff == "keep") return Result<Token>(Token::TK_Keep, start, end, buff);
-  if (buff == "zero") return Result<Token>(Token::TK_Zero, start, end, buff);
-  if (buff == "if") return Result<Token>(Token::TK_If, start, end, buff);
-  if (buff == "else") return Result<Token>(Token::TK_Else, start, end, buff);
+  if (buff == "readc")
+    return Result<Token>(Token::TK_Readc, start, end, buff);
+  if (buff == "end")
+    return Result<Token>(Token::TK_End, start, end, buff);
+  if (buff == "let")
+    return Result<Token>(Token::TK_Let, start, end, buff);
+  if (buff == "keep")
+    return Result<Token>(Token::TK_Keep, start, end, buff);
+  if (buff == "zero")
+    return Result<Token>(Token::TK_Zero, start, end, buff);
+  if (buff == "if")
+    return Result<Token>(Token::TK_If, start, end, buff);
+  if (buff == "else")
+    return Result<Token>(Token::TK_Else, start, end, buff);
   // if (buff == "None") return Result<Token>(Token::TK_None, start, end, buff);
-  if (buff == "true") return Result<Token>(Token::TK_True, start, end, buff);
-  if (buff == "false") return Result<Token>(Token::TK_False, start, end, buff);
-  if (buff == "LT") return Result<Token>(Token::TK_LT, start, end, buff);
-  if (buff == "GE") return Result<Token>(Token::TK_GE, start, end, buff);
-  if (buff == "EQ") return Result<Token>(Token::TK_EQ, start, end, buff);
-  if (buff == "OR") return Result<Token>(Token::TK_OR, start, end, buff);
-  if (buff == "ADD") return Result<Token>(Token::TK_ADD, start, end, buff);
-  if (buff == "SUB") return Result<Token>(Token::TK_SUB, start, end, buff);
-  if (buff == "MOD") return Result<Token>(Token::TK_MOD, start, end, buff);
-  if (buff == "CAST") return Result<Token>(Token::TK_CAST, start, end, buff);
-  if (buff == "GET") return Result<Token>(Token::TK_GET, start, end, buff);
-  if (buff == "SET") return Result<Token>(Token::TK_SET, start, end, buff);
+  if (buff == "true")
+    return Result<Token>(Token::TK_True, start, end, buff);
+  if (buff == "false")
+    return Result<Token>(Token::TK_False, start, end, buff);
+  if (buff == "LT")
+    return Result<Token>(Token::TK_LT, start, end, buff);
+  if (buff == "GE")
+    return Result<Token>(Token::TK_GE, start, end, buff);
+  if (buff == "EQ")
+    return Result<Token>(Token::TK_EQ, start, end, buff);
+  if (buff == "OR")
+    return Result<Token>(Token::TK_OR, start, end, buff);
+  if (buff == "ADD")
+    return Result<Token>(Token::TK_ADD, start, end, buff);
+  if (buff == "SUB")
+    return Result<Token>(Token::TK_SUB, start, end, buff);
+  if (buff == "MOD")
+    return Result<Token>(Token::TK_MOD, start, end, buff);
+  if (buff == "CAST")
+    return Result<Token>(Token::TK_CAST, start, end, buff);
+  if (buff == "GET")
+    return Result<Token>(Token::TK_GET, start, end, buff);
+  if (buff == "SET")
+    return Result<Token>(Token::TK_SET, start, end, buff);
+  if (buff == "GENERIC")
+    return Result<Token>(Token::TK_GENERIC, start, end, buff);
 
   if (std::all_of(buff.begin(), buff.end(), isdigit))
     return Result<Token>(Token::TK_Int, start, end, buff);
@@ -193,8 +223,7 @@ Result<Token> Lexer::LexImpl() {
                   [](char c) { return isalnum(c) || c == '_'; }))
     return Result<Token>(Token::TK_Identifier, start, end, buff);
 
-  return Result<Token>::Diagnostic(input_, start)
-         << "Unable to lex `" << buff << "`";
+  return Diagnostic(input_, start) << "Unable to lex `" << buff << "`";
 }
 
 }  // namespace lang

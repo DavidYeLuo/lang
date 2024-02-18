@@ -19,7 +19,6 @@ class Token {
     TK_Lambda,
     TK_Assign,
     TK_Arrow,
-    TK_Write,
     TK_Readc,
     TK_Call,
     TK_ImpureCall,
@@ -38,6 +37,8 @@ class Token {
     TK_RAngleBrack,  // >
     TK_LSqBrack,     // [
     TK_RSqBrack,     // ]
+    TK_LParen,       // (
+    TK_RParen,       // )
     TK_CAST,
     TK_GET,
     TK_SET,
@@ -49,6 +50,7 @@ class Token {
     TK_SUB,
     TK_MOD,
     TK_End,
+    TK_GENERIC,
     TK_EOF,
   };
 
@@ -106,7 +108,8 @@ class Lexer {
   Result<Token> Peek() {
     if (!has_lookahead_tok_) {
       auto res = LexImpl();
-      if (!res) return res;
+      if (!res)
+        return res;
       has_lookahead_tok_ = true;
       lookahead_tok_ = *res;
     }
@@ -118,6 +121,12 @@ class Lexer {
   // checking the resulting token.
   SourceLocation getCurrentLoc() const {
     return SourceLocation(row_, col_, input_.tellg());
+  }
+
+  SourceLocation PeekLoc() {
+    // Note this is what the comment above `getCurrentLoc` recommends but it
+    // will crash on a bad peek.
+    return Peek()->getStart();
   }
 
   std::istream &getInput() const { return input_; }

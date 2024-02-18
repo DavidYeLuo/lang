@@ -16,8 +16,7 @@
 
 NODE(Define)
 
-EXPR_FIRST(Write)
-EXPR(Readc)
+EXPR_FIRST(Readc)
 EXPR(Declare)
 EXPR(Composite)
 EXPR(Get)

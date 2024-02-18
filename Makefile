@@ -1,8 +1,9 @@
-CC = clang  # version?
+CC = clang
 CXX = clang++
-CPPFLAGS = -Wall -Werror -std=c++20 -fno-rtti -fno-exceptions -g $(EXTRA_CPPFLAGS) -ferror-limit=1 -ftrivial-auto-var-init=pattern -fsanitize=address -fsanitize=undefined
+CPPFLAGS = -Wall -Werror -std=c++20 -fno-rtti -fno-exceptions -g -ferror-limit=1 -ftrivial-auto-var-init=pattern -fsanitize=address -fsanitize=undefined $(EXTRA_CPPFLAGS)
 LDFLAGS = -fuse-ld=lld -Wl,--gc-sections $(EXTRA_LDFLAGS)
 LLVM_CONFIG ?= llvm-config
+CLANG_FORMAT ?= clang-format
 LLVM_CONFIG_CXX_FLAGS = $(shell $(LLVM_CONFIG) --cxxflags)
 LLVM_CONFIG_LD_FLAGS = $(shell $(LLVM_CONFIG) --ldflags)
 LLVM_CONFIG_SYSTEM_LIBS = $(shell $(LLVM_CONFIG) --system-libs)
@@ -14,7 +15,7 @@ LDFLAGS := $(LLVM_CONFIG_LD_FLAGS) $(LLVM_CONFIG_SYSTEM_LIBS) $(LLVM_CONFIG_LIBS
 # Add new source files here.
 SRCS = compiler.cpp parser.cpp lexer.cpp astdumper.cpp
 TEST_SRCS = test.cpp testargparse.cpp
-HDRS = lang.h nodes.def ast.h astbuilder.h compiler.h lexer.h parser.h astdumper.h argparse.h
+HDRS = lang.h nodes.def ast.h astbuilder.h compiler.h lexer.h parser.h astdumper.h argparse.h astvisitor.h
 
 OBJS = $(SRCS:.cpp=.o)
 TEST_OBJS = $(TEST_SRCS:.cpp=.o)
@@ -48,7 +49,7 @@ clean:
 	rm -rf $(EXE) *.o $(TEST) *.out examples/*.obj
 
 format:
-	clang-format --style=google -i $(HDRS) $(SRCS) $(TEST_SRCS) lang.cpp
+	$(CLANG_FORMAT) --style=file -i $(HDRS) $(SRCS) $(TEST_SRCS) lang.cpp
 
 format-check:
-	clang-format --style=google $(HDRS) $(SRCS) $(TEST_SRCS) lang.cpp --dry-run -Werror
+	$(CLANG_FORMAT) --style=file $(HDRS) $(SRCS) $(TEST_SRCS) lang.cpp --dry-run -Werror

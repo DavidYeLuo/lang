@@ -15,7 +15,8 @@ int main(int argc, char **argv) {
   argparser.AddOptArg("output", 'o');
 
   auto f = argparser.get("file");
-  if (!f) return 1;
+  if (!f)
+    return 1;
 
   std::ifstream input(*f);
   if (!input) {
@@ -38,7 +39,8 @@ int main(int argc, char **argv) {
   }
 
   auto mode = lang::File;
-  if (*argparser.get<bool>("emit-llvm")) mode = lang::IR;
+  if (*argparser.get<bool>("emit-llvm"))
+    mode = lang::IR;
 
   std::string outname;
   if (auto output = argparser.get("output")) {

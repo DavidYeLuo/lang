@@ -80,11 +80,6 @@ class ASTBuilder {
     return llvm::cast<Zero>(*nodes_.emplace_back(new Zero(start, type)));
   }
 
-  const Write &getWrite(const SourceLocation &start, const Type &arg_type) {
-    return llvm::cast<Write>(
-        *nodes_.emplace_back(new Write(start, getWriteType(arg_type))));
-  }
-
   const Readc &getReadc(const SourceLocation &start) {
     const CallableType &ty = getCallableType(
         getCompositeType({&getIOType(), &getIntType()}), {&getIOType()});
@@ -107,63 +102,41 @@ class ASTBuilder {
         *nodes_.emplace_back(new Keep(start, name, expr, body)));
   }
 
-  const Callable &getCallable(const SourceLocation &start, const Expr &body,
-                              const std::vector<std::string> &arg_names,
-                              const std::vector<const Type *> &arg_types) {
-    const CallableType &callable_ty =
-        getCallableType(body.getType(), arg_types);
-    return llvm::cast<Callable>(*nodes_.emplace_back(
-        new Callable(start, callable_ty, body, arg_names)));
-  }
-
-  using ArgVectorTy = std::vector<const Arg *>;
-
   // Create a `Callable` where the return type is explicitly given. The body is
   // generated from the callback which receives two arguments:
   //
   //   1. A reference to the `Callable` where the body will be assigned to.
   //   2. The list of argument expressions passed to the callable.
   //
-  using BodyCallbackTy =
-      std::function<const Expr &(const CallableBase &, const ArgVectorTy &)>;
+  using BodyCallbackTy = std::function<const Expr &(
+      const CallableBase &, const std::vector<const Arg *> &)>;
   const Callable &getCallable(const SourceLocation &start, const Type &ret_type,
                               const std::vector<SourceLocation> &arg_starts,
                               const std::vector<std::string> &arg_names,
                               const std::vector<const Type *> &arg_types,
                               const BodyCallbackTy &callback) {
-    ArgVectorTy args;
+    // TODO: We need the actual args to be non-const so we can eventually set
+    // the parent callable pointer after its creation. Ideally we'd just have
+    // one vector of const arg pointers.
+    std::vector<Arg *> args;
+    std::vector<const Arg *> const_args;
     for (size_t i = 0; i < arg_types.size(); ++i) {
-      const Arg *ptr = new Arg(arg_starts.at(i), *arg_types.at(i), i);
+      Arg *ptr = new Arg(arg_starts.at(i), *arg_types.at(i), i);
       nodes_.emplace_back(ptr);
       args.push_back(ptr);
+      const_args.push_back(ptr);
     }
 
     const CallableType &callable_ty = getCallableType(ret_type, arg_types);
-    Callable *callable = new Callable(start, callable_ty, arg_names);
+    Callable *callable =
+        new Callable(start, callable_ty, arg_names, const_args);
     nodes_.emplace_back(callable);
-    const Expr &body = callback(*callable, args);
+    for (Arg *arg : args) {
+      arg->setParent(*callable);
+    }
+    const Expr &body = callback(*callable, const_args);
     callable->setBody(body);
     return *callable;
-  }
-
-  // Create a `Callable` where the return type is inferred from the resulting
-  // type of the body returned by the callback. The callback receives one
-  // argument: the list of argument expressions passed to the callable.
-  using BodyCallback2Ty = std::function<const Expr &(const ArgVectorTy &)>;
-  const Callable &getCallable(const SourceLocation &start,
-                              const std::vector<SourceLocation> &arg_starts,
-                              const std::vector<std::string> &arg_names,
-                              const std::vector<const Type *> &arg_types,
-                              const BodyCallback2Ty &callback) {
-    ArgVectorTy args;
-    for (size_t i = 0; i < arg_types.size(); ++i) {
-      const Arg *ptr = new Arg(arg_starts.at(i), *arg_types.at(i), i);
-      nodes_.emplace_back(ptr);
-      args.push_back(ptr);
-    }
-
-    const Expr &body = callback(args);
-    return getCallable(start, body, arg_names, arg_types);
   }
 
   // const None &getNone() {
@@ -177,7 +150,8 @@ class ASTBuilder {
     assert(callable_ty.getNumArgs() == args.size() &&
            "Mismatch number of arguments and types");
     for (size_t i = 0; i < args.size(); ++i) {
-      assert(Equals(callable_ty.getArgType(i), args.at(i)->getType()));
+      assert(callable_ty.getArgType(i).isGeneric() ||
+             Equals(callable_ty.getArgType(i), args.at(i)->getType()));
     }
     return llvm::cast<Call>(
         *nodes_.emplace_back(new Call(start, ret_ty, func, args, pure)));
@@ -229,7 +203,6 @@ class ASTBuilder {
   const Type &getIOType() { return getNamedType("IO"); }
   const Type &getCharType() { return getNamedType("char"); }
   const Type &getCharArrayType(std::string_view literal) {
-    // return getNamedType("char");
     //  +1 for the null terminator.
     return getArrayType(getCharType(), literal.size() + 1);
   }
@@ -256,14 +229,25 @@ class ASTBuilder {
         *types_.emplace_back(new CompositeType(types)));
   }
 
+  const GenericType &getGenericType() { return generic_; }
+
   bool Equals(const Type &lhs, const Type &rhs) const;
 #define TYPE(name) bool Equals(const name &lhs, const Type &rhs) const;
 #include "types.def"
+
+  // Similar to Equals(const Callable &, ...) but it also takes into account
+  // generic argument types.
+  bool CallableTypesMatch(const CallableType &lhs,
+                          const CallableType &rhs) const;
+
+  bool ArgumentTypesMatch(const std::vector<const Type *> &args1,
+                          const std::vector<const Type *> &args2) const;
 
  private:
   std::vector<std::unique_ptr<const Node>> nodes_;
   std::vector<std::unique_ptr<const Type>> types_;
   std::map<std::string, const NamedType *, std::less<>> named_types_;
+  GenericType generic_;
 };
 
 }  // namespace lang

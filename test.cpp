@@ -44,20 +44,26 @@ class TmpFile {
 int RunCommand(std::string_view cmd, std::string *out = nullptr,
                std::string *err = nullptr, std::string *in_text = nullptr) {
   std::string sys_cmd;
-  if (in_text) sys_cmd.append("echo -n '").append(*in_text).append("' | ");
+  if (in_text)
+    sys_cmd.append("echo -n '").append(*in_text).append("' | ");
   sys_cmd.append(cmd);
 
   TmpFile out_file, err_file;
-  if (out) sys_cmd.append(" >").append(out_file.getPath());
-  if (err) sys_cmd.append(" 2>").append(err_file.getPath());
+  if (out)
+    sys_cmd.append(" >").append(out_file.getPath());
+  if (err)
+    sys_cmd.append(" 2>").append(err_file.getPath());
 
   std::cerr << "Running cmd: " << sys_cmd << std::endl;
 
   int res = system(sys_cmd.c_str());
-  if (out) *out = out_file.getContents();
-  if (err) *err = err_file.getContents();
+  if (out)
+    *out = out_file.getContents();
+  if (err)
+    *err = err_file.getContents();
 
-  if (WIFEXITED(res)) return WEXITSTATUS(res);
+  if (WIFEXITED(res))
+    return WEXITSTATUS(res);
   return res;
 }
 
@@ -127,7 +133,7 @@ TEST(Lexer, HelloWorld) {
   CheckToken(*lexer.Lex(), Token::TK_Arrow, 1, 19, 1, 21, "->");
   CheckToken(*lexer.Lex(), Token::TK_Identifier, 1, 22, 1, 24, "IO");
   CheckToken(*lexer.Lex(), Token::TK_Call, 2, 3, 2, 7, "call");
-  CheckToken(*lexer.Lex(), Token::TK_Write, 2, 8, 2, 13, "write");
+  CheckToken(*lexer.Lex(), Token::TK_Identifier, 2, 8, 2, 13, "write");
   CheckToken(*lexer.Lex(), Token::TK_Identifier, 2, 14, 2, 16, "io");
   CheckToken(*lexer.Lex(), Token::TK_Str, 2, 17, 2, 32, "\"Hello world\n\"");
   CheckToken(*lexer.Lex(), Token::TK_End, 2, 33, 2, 36, "end");
@@ -155,15 +161,28 @@ TEST(Errors, ShowLineInError) {
 TEST(Errors, ReturnTypeMismatch) {
   constexpr char kMismatch[] = "def main = \\IO io -> IO 2\n";
   constexpr std::string_view kExpectedError =
-      "1:20: Mismatch between callable return type and body return type; "
-      "expected IO but instead found int";
+      "1:25: Expression type mismatch; found `int` but expected `IO`";
   std::stringstream input;
   input << kMismatch;
   lang::Lexer lexer(input);
   lang::Parser parser(lexer);
   auto res = parser.Parse();
   ASSERT_TRUE(res.hasError());
-  ASSERT_TRUE(res.getError().starts_with(kExpectedError));
+  ASSERT_TRUE(res.getError().starts_with(kExpectedError)) << res.getError();
+}
+
+TEST(Errors, MultipleCallableOverrides) {
+  std::ifstream input("examples/multiple-callable-overrides.lang");
+  constexpr std::string_view kExpectedError =
+      "9:15: Callable `writeln` with arg types `IO int GENERIC ` is handled by "
+      "another callable\n"
+      "def writeln = \\IO io int arg1 GENERIC arg2 -> IO\n"
+      "              ^\n";
+  lang::Lexer lexer(input);
+  lang::Parser parser(lexer);
+  auto res = parser.Parse();
+  ASSERT_TRUE(res.hasError());
+  ASSERT_TRUE(res.getError().starts_with(kExpectedError)) << res.getError();
 }
 
 TEST(E2E, HelloWorld) { BuildAndCheckOutput(kHelloWorldStr, "Hello world\n"); }
@@ -207,11 +226,8 @@ TEST_F(LangCompilerE2E, HelloWorld) {
 }
 
 TEST(E2E, HelloWorldLet) {
-  constexpr char kHelloWorldLetStr[] =
-      "def main = \\IO io -> IO\n"
-      "  let write_alias = \\IO [13 x char] -> IO write\n"
-      "  call write_alias io \"Hello world\\n\" end";
-  BuildAndCheckOutput(kHelloWorldLetStr, "Hello world\n");
+  std::ifstream input("examples/hello-world-let.lang");
+  BuildAndCheckOutput(input, "Hello world\n");
 }
 
 TEST(E2E, WriteInt) {
@@ -298,18 +314,8 @@ def main = \\IO io -> IO                    \
 }
 
 TEST(E2E, FuncAsArgument) {
-  constexpr char kFuncAsArgument[] =
-      "\
-def callback_func = \\int x -> int              \
-  ADD x 1                                       \
-                                                \
-def apply = \\int x \\int -> int func -> int    \
-  call func x end                               \
-                                                \
-def main = \\IO io -> IO                        \
-  let x = int call apply 10 callback_func end   \
-  call write io x end";
-  BuildAndCheckOutput(kFuncAsArgument, "11");
+  std::ifstream input("examples/func-as-argument.lang");
+  BuildAndCheckOutput(input, "11");
 }
 
 TEST(E2E, Readc) {
@@ -436,6 +442,21 @@ TEST(RegressionTests, Regression1) {
   ASSERT_FALSE(maybe_ast.hasError()) << maybe_ast.getError();
   TmpFile obj_file;
   ASSERT_TRUE(lang::Compile(*maybe_ast, obj_file.getPath(), lang::File));
+}
+
+TEST(E2E, TypeDeduction) {
+  std::ifstream input("examples/type-deduction.lang");
+  BuildAndCheckOutput(input, "abc\n123\n");
+}
+
+TEST(E2E, Metaprogramming) {
+  std::ifstream input("examples/metaprogramming.lang");
+  BuildAndCheckOutput(input, "abc\n123\ndef456\n");
+}
+
+TEST(E2E, AltCallSyntax) {
+  std::ifstream input("examples/alt-call-syntax.lang");
+  BuildAndCheckOutput(input, "result is: 55\nabc\n123\ndef456\n");
 }
 
 }  // namespace

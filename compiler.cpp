@@ -39,8 +39,11 @@ llvm::DIType *Compiler::getDIType(const NamedType &named_ty) {
     return di_builder_.createBasicType(named_ty.getName(), /*SizeInBits=*/64,
                                        llvm::dwarf::DW_ATE_unsigned);
 
-  std::cerr << "Unhandled named type dwarf ecoding\n";
-  __builtin_trap();
+  UNREACHABLE("Unhandled named type dwarf ecoding");
+}
+
+llvm::DIType *Compiler::getDIType(const GenericType &) {
+  UNREACHABLE("Generic types should not be directly used for code emission.");
 }
 
 llvm::DIType *Compiler::getDIType(const CompositeType &comp_ty) {
@@ -73,6 +76,18 @@ llvm::DIType *Compiler::getDIType(const CallableType &callable_ty) {
 }
 
 void Compiler::CompileDefine(const Define &define) {
+  // Generic functions should never be compiled. Instead, the correct
+  // function should be generated with a call to this define.
+  if (define.isGenericCallable()) {
+    if (llvm::isa<Callable>(define.getBody())) {
+      [[maybe_unused]] const auto [it, inserted] =
+          named_generic_callables_.insert(
+              {&llvm::cast<Callable>(define.getBody()), define.getName()});
+      assert(inserted && "Duplicate definitions");
+    }
+    return;
+  }
+
   if (const auto *func_body = llvm::dyn_cast<Callable>(&define.getBody())) {
     const auto &func_ty = llvm::cast<CallableType>(func_body->getType());
     llvm::FunctionType *llvm_func_ty = getLLVMFuncType(func_ty);
@@ -92,21 +107,9 @@ void Compiler::CompileDefine(const Define &define) {
                                  define.getName(), mod_);
     }
 
-    const SourceLocation &start = define.getStart();
-    llvm::DISubprogram *SP = di_builder_.createFunction(
-        &di_unit_, define.getName(), /*LinkageName=*/"", &di_unit_,
-        start.getRow(), llvm::cast<llvm::DISubroutineType>(getDIType(func_ty)),
-        start.getRow(), llvm::DINode::FlagPrototyped,
-        llvm::DISubprogram::SPFlagDefinition);
-    func->setSubprogram(SP);
-
-    // TODO: Maybe getCallable can handle all this?
-    assert(!processed_exprs_.contains(func_body));
-    processed_exprs_.try_emplace(func_body, func);
-    FillFuncBody(*func_body, func);
+    FillFuncBody(*func_body, func, define.getName());
   } else {
-    // TODO: Handle non-function definitions.
-    __builtin_trap();
+    UNREACHABLE("TODO: Handle non-function definitions");
   }
 }
 
@@ -173,19 +176,17 @@ llvm::FunctionType *Compiler::getLLVMFuncType(const CallableType &ty) const {
   }
   llvm::Type *ret_ty = return_as_arg ? llvm::Type::getVoidTy(mod_.getContext())
                                      : getLLVMType(ty.getReturnType());
+  if (llvm::isa<CallableType>(ty.getReturnType()))
+    ret_ty = llvm::PointerType::getUnqual(mod_.getContext());
   return llvm::FunctionType::get(ret_ty, func_args, /*isVarArg=*/false);
 }
 
 llvm::Type *Compiler::getLLVMType(const Type &ty) const {
   switch (ty.getKind()) {
-    case Type::TK_NamedType:
-      return getLLVMType(llvm::cast<NamedType>(ty));
-    case Type::TK_CompositeType:
-      return getLLVMType(llvm::cast<CompositeType>(ty));
-    case Type::TK_CallableType:
-      return getLLVMFuncType(llvm::cast<CallableType>(ty));
-    case Type::TK_ArrayType:
-      return getLLVMType(llvm::cast<ArrayType>(ty));
+#define TYPE(name)      \
+  case Type::TK_##name: \
+    return getLLVMType(llvm::cast<name>(ty));
+#include "types.def"
   }
 }
 
@@ -201,22 +202,25 @@ llvm::Type *Compiler::getLLVMType(const CompositeType &type) const {
 }
 
 llvm::Type *Compiler::getLLVMType(const NamedType &type) const {
-  // if (type.getName() == "str") return getStrType();
-  if (type.getName() == builtins::kIOTypeName) return getIntType(32);
-  if (type.getName() == builtins::kIntTypeName) return getIntType(32);
-  if (type.getName() == builtins::kCharTypeName) return getCharType();
+  if (type.getName() == builtins::kIOTypeName)
+    return getIntType(32);
+  if (type.getName() == builtins::kIntTypeName)
+    return getIntType(32);
+  if (type.getName() == builtins::kCharTypeName)
+    return getCharType();
   if (type.getName() == builtins::kNoneTypeName)
     return llvm::Type::getVoidTy(mod_.getContext());
-  if (type.getName() == builtins::kBoolTypeName) return getIntType(1);
+  if (type.getName() == builtins::kBoolTypeName)
+    return getIntType(1);
   if (type.getName() == builtins::kCPtrTypeName)
     return llvm::PointerType::getUnqual(mod_.getContext());
-  std::cerr << "Unhandled type name: " << type.getName() << std::endl;
-  __builtin_trap();
+  UNREACHABLE("Unhandled type name: %s", type.getName().data());
 }
 
 void Compiler::ReplaceAllUsesWith(llvm::Value *replacement,
                                   llvm::Value *replacing) {
-  if (replacement == replacing) return;
+  if (replacement == replacing)
+    return;
 
   // Do a normal replacement.
   replacing->replaceAllUsesWith(replacement);
@@ -231,32 +235,123 @@ void Compiler::ReplaceAllUsesWith(llvm::Value *replacement,
   }
 }
 
+const Expr &ResolveLets(const Expr &expr) {
+  if (const auto *let = llvm::dyn_cast<Let>(&expr))
+    return ResolveLets(let->getExpr());
+  return expr;
+}
+
+llvm::Value *Compiler::ManifestGenericCallable(llvm::IRBuilder<> &builder,
+                                               const Call &call) {
+  const CallableType &callable_ty =
+      llvm::cast<CallableType>(call.getFunc().getType());
+  assert(callable_ty.isGenericCallable());
+
+  std::vector<const Expr *> args;
+  auto old_generic_exprs_ = applied_generic_exprs_;
+  ASTBuilder astbuilder;
+
+  const Expr *dummy_func;
+  const Expr &func = ResolveLets(call.getFunc());
+
+  // Attempt to match the arguments to the parameters.
+  std::vector<const Type *> arg_types;
+  for (size_t i = 0; i < call.getNumArgs(); ++i) {
+    arg_types.push_back([&]() -> const Type * {
+      if (!callable_ty.getArgType(i).isGeneric())
+        return &callable_ty.getArgType(i);
+      if (!call.getArgAt(i).getType().isGeneric())
+        return &call.getArgAt(i).getType();
+      auto found =
+          applied_generic_exprs_.find(&llvm::cast<Arg>(call.getArgAt(i)));
+      assert(found != applied_generic_exprs_.end());
+      return &found->second->getType();
+    }());
+    assert(!arg_types.back()->isGeneric());
+  }
+
+  if (const auto *decl = llvm::dyn_cast<Declare>(&func)) {
+    const auto &new_callable_ty =
+        astbuilder.getCallableType(callable_ty.getReturnType(), arg_types);
+    dummy_func = &astbuilder.getDeclare(func.getStart(), decl->getName(),
+                                        new_callable_ty);
+  } else {
+    const Callable &callable = llvm::cast<Callable>(func);
+
+    dummy_func = &astbuilder.getCallable(
+        callable.getStart(), callable.getType().getReturnType(),
+        callable.getArgLocs(), callable.getArgNames(), arg_types,
+        [&](const CallableBase &this_func,
+            const std::vector<const Arg *> &args) -> const Expr & {
+          assert(args.size() == callable.getNumArgs());
+          for (size_t i = 0; i < args.size(); ++i) {
+            applied_generic_exprs_[&callable.getArg(i)] = args.at(i);
+          }
+          return callable.getBody();
+        });
+
+    auto found = named_generic_callables_.find(&callable);
+    if (found != named_generic_callables_.end()) {
+      named_generic_callables_[llvm::cast<Callable>(dummy_func)] =
+          found->second;
+    }
+  }
+
+  assert(!dummy_func->getType().isGeneric());
+
+  Call dummy_call(call.getStart(), call.getType(), *dummy_func, call.getArgs(),
+                  call.isPure());
+
+  llvm::Value *result = getCall(builder, dummy_call);
+  applied_generic_exprs_ = old_generic_exprs_;
+  return result;
+}
+
 llvm::Value *Compiler::getCallable(llvm::IRBuilder<> &builder,
                                    const Callable &callable) {
+  std::string name = [&]() -> std::string {
+    auto found = named_generic_callables_.find(&callable);
+    if (found == named_generic_callables_.end())
+      return "";
+    return Mangle(found->second, callable.getType());
+  }();
   llvm::FunctionType *llvm_func_ty = getLLVMFuncType(callable.getType());
-
   llvm::Function *func = llvm::Function::Create(
-      llvm_func_ty, llvm::Function::ExternalLinkage, "", mod_);
-  FillFuncBody(callable, func);
+      llvm_func_ty, llvm::Function::ExternalLinkage, name, mod_);
+
+  FillFuncBody(callable, func, name);
   return func;
 }
 
-void Compiler::FillFuncBody(const Callable &callable, llvm::Function *func) {
+void Compiler::FillFuncBody(const Callable &callable, llvm::Function *func,
+                            std::string_view name) {
+  assert(!processed_exprs_.contains(&callable));
+  processed_exprs_.try_emplace(&callable, func);
+
+  const SourceLocation &start = callable.getStart();
+  llvm::DISubprogram *SP = di_builder_.createFunction(
+      &di_unit_, name, name, &di_unit_, start.getRow(),
+      llvm::cast<llvm::DISubroutineType>(getDIType(callable.getType())),
+      start.getRow(), llvm::DINode::FlagPrototyped,
+      llvm::DISubprogram::SPFlagDefinition);
+  func->setSubprogram(SP);
+
   const Type &ty = callable.getType();
   bool return_as_arg = ShouldReturnValueAsArgument(ty.getReturnType());
-  if (return_as_arg) {
+  if (return_as_arg)
     func->getArg(0)->setName("return_val");
-  }
-  for (size_t i = 0; i < callable.getNumArgs(); ++i) {
+
+  for (size_t i = 0; i < callable.getNumArgs(); ++i)
     func->getArg(i + return_as_arg)->setName(callable.getArgName(i));
-  }
 
   // Create the function body.
   llvm::BasicBlock *bb =
       llvm::BasicBlock::Create(mod_.getContext(), "entry", func);
   llvm::IRBuilder<> nested_builder(bb);
 
+  auto processed_exprs_cpy = processed_exprs_;
   llvm::Value *ret = getExpr(nested_builder, callable.getBody());
+  processed_exprs_ = processed_exprs_cpy;
   if (return_as_arg) {
     ReplaceAllUsesWith(func->getArg(0), ret);
     nested_builder.CreateRetVoid();
@@ -264,13 +359,12 @@ void Compiler::FillFuncBody(const Callable &callable, llvm::Function *func) {
     nested_builder.CreateRet(ret);
   }
 
-  if (auto *SP = func->getSubprogram()) di_builder_.finalizeSubprogram(SP);
+  assert(func->getSubprogram());
+  di_builder_.finalizeSubprogram(func->getSubprogram());
 
   if (llvm::verifyFunction(*func, &llvm::errs())) {
-    mod_.dump();
-    std::cerr << "Function not well-formed" << std::endl;
     func->print(llvm::errs());
-    __builtin_trap();
+    UNREACHABLE("Function for callable %p not well-formed", &callable);
   }
 }
 
@@ -282,12 +376,17 @@ llvm::Value *Compiler::getLet(llvm::IRBuilder<> &builder, const Let &let) {
 
 llvm::Value *Compiler::getKeep(llvm::IRBuilder<> &builder, const Keep &keep) {
   llvm::Value *val = getExpr(builder, keep.getExpr());
-  if (!val->getType()->isVoidTy()) val->setName(keep.getName());
+  if (!val->getType()->isVoidTy())
+    val->setName(keep.getName());
   return getExpr(builder, keep.getBody());
 }
 
 std::string Compiler::Mangle(const Type &type) const {
   switch (type.getKind()) {
+    case Type::TK_GenericType: {
+      UNREACHABLE(
+          "Generic types should not be directly used for code emission.");
+    }
     case Type::TK_NamedType:
       return std::string(llvm::cast<NamedType>(type).getName());
     case Type::TK_ArrayType: {
@@ -341,10 +440,24 @@ llvm::Value *Compiler::getExpr(llvm::IRBuilder<> &builder, const Expr &expr) {
       llvm::DILocation::get(di_unit_.getContext(), expr.getStart().getRow(),
                             expr.getStart().getCol(), func->getSubprogram()));
 
-  if (llvm::isa<Let>(expr)) return getExprImpl(builder, expr);
+  if (llvm::isa<Let>(expr))
+    return getExprImpl(builder, expr);
 
   auto found = processed_exprs_.find(&expr);
-  if (found != processed_exprs_.end()) return found->second;
+  if (found != processed_exprs_.end())
+    return found->second;
+
+  if (const Arg *arg = llvm::dyn_cast<Arg>(&expr)) {
+    auto found_arg = applied_generic_exprs_.find(arg);
+    if (found_arg != applied_generic_exprs_.end())
+      return getExpr(builder, *found_arg->second);
+  }
+
+  if (const auto *callable = llvm::dyn_cast<Callable>(&expr)) {
+    // A callable will be in charge of creating its own global and caching
+    // itself.
+    return getCallable(builder, *callable);
+  }
 
   llvm::Type *type = getLLVMType(expr.getType());
 
@@ -367,11 +480,12 @@ llvm::Value *Compiler::getExpr(llvm::IRBuilder<> &builder, const Expr &expr) {
 llvm::Value *Compiler::getExprImpl(llvm::IRBuilder<> &builder,
                                    const Expr &expr) {
   switch (expr.getKind()) {
-    case Node::NK_Declare:
-      ASTDumper(expr, std::cerr).Dump();
-      std::cerr << "Decl should not be handled like other expressions"
-                << std::endl;
-      __builtin_trap();
+    case Node::NK_Declare: {
+      const Declare &decl = llvm::cast<Declare>(expr);
+      if (decl.getName() == "write")
+        return ManifestWrite(decl);
+      UNREACHABLE("Decl should not be handled like other expressions");
+    }
     // case Node::NK_None:
     //   return getNone();
     case Node::NK_Get:
@@ -382,8 +496,6 @@ llvm::Value *Compiler::getExprImpl(llvm::IRBuilder<> &builder,
       return getCast(builder, llvm::cast<Cast>(expr));
     case Node::NK_Zero:
       return getZero(builder, llvm::cast<Zero>(expr));
-    case Node::NK_Write:
-      return getWrite(llvm::cast<Write>(expr));
     case Node::NK_Readc:
       return getReadc(builder, llvm::cast<Readc>(expr));
     case Node::NK_Str:
@@ -397,12 +509,15 @@ llvm::Value *Compiler::getExprImpl(llvm::IRBuilder<> &builder,
     case Node::NK_Keep:
       return getKeep(builder, llvm::cast<Keep>(expr));
     case Node::NK_Callable:
-      return getCallable(builder, llvm::cast<Callable>(expr));
+      UNREACHABLE("Callables should be handled on their own in getExpr");
     case Node::NK_Composite:
       return getComposite(builder, llvm::cast<Composite>(expr));
     case Node::NK_Arg: {
       const Arg &arg = llvm::cast<Arg>(expr);
-      llvm::Function *func = builder.GetInsertBlock()->getParent();
+      const Callable &parent = arg.getParent();
+      // This should've already been cached.
+      llvm::Function *func =
+          llvm::cast<llvm::Function>(processed_exprs_.at(&parent));
       bool return_as_arg = func->getReturnType()->isVoidTy();
       return func->getArg(arg.getArgNo() + return_as_arg);
     }
@@ -453,9 +568,8 @@ llvm::Value *Compiler::getBoolExpr(llvm::IRBuilder<> &builder,
   } else if (expr.getType().isNamedType(builtins::kBoolTypeName)) {
     return getExpr(builder, expr);
   } else {
-    std::cerr << "Unable to implicitly convert type to bool: "
-              << expr.getType().toString() << std::endl;
-    __builtin_trap();
+    UNREACHABLE("Unable to implicitly convert type to bool: %s",
+                expr.getType().toString().c_str());
   }
 }
 
@@ -494,11 +608,6 @@ llvm::Value *Compiler::getIf(llvm::IRBuilder<> &builder, const If &if_expr) {
   func->insert(func->end(), merge_bb);
   builder.SetInsertPoint(merge_bb);
 
-  if (true_expr->getType() != false_expr->getType()) {
-    true_expr->getType()->dump();
-    false_expr->getType()->dump();
-    ASTDumper(if_expr, std::cerr).Dump();
-  }
   assert(true_expr->getType() == false_expr->getType());
   llvm::PHINode *phi = builder.CreatePHI(true_expr->getType(),
                                          /*NumReservedValues=*/2);
@@ -516,7 +625,8 @@ llvm::Value *Compiler::getLoadedCStdin(llvm::IRBuilder<> &builder) const {
 llvm::Value *Compiler::getReadc(llvm::IRBuilder<> &builder,
                                 const Readc &readc) {
   constexpr std::string_view kReadcName = "readc";
-  if (auto *func = mod_.getFunction(kReadcName)) return func;
+  if (auto *func = mod_.getFunction(kReadcName))
+    return func;
 
   auto *func_ty = llvm::cast<llvm::FunctionType>(getLLVMType(readc));
   assert(func_ty->getReturnType()->isVoidTy());
@@ -552,12 +662,12 @@ llvm::Value *Compiler::getZero(llvm::IRBuilder<> &builder, const Zero &zero) {
   return alloc;
 }
 
-llvm::Value *Compiler::getWrite(const Write &write) {
-  auto *func_ty = llvm::cast<llvm::FunctionType>(getLLVMType(write.getType()));
-  const Type &arg_ty = write.getArgType();
-  llvm::Function *func =
-      llvm::Function::Create(func_ty, llvm::Function::ExternalLinkage,
-                             "write_" + Mangle(arg_ty), mod_);
+llvm::Value *Compiler::ManifestWrite(const Declare &write) {
+  const Type &type = write.getType();
+  const Type &arg_ty = llvm::cast<CallableType>(type).getArgType(1);
+  auto *func_ty = llvm::cast<llvm::FunctionType>(getLLVMType(type));
+  llvm::Function *func = llvm::Function::Create(
+      func_ty, llvm::Function::ExternalLinkage, Mangle("write", arg_ty), mod_);
 
   // Dispatch to a C-style printf.
   llvm::BasicBlock *bb =
@@ -578,9 +688,7 @@ llvm::Value *Compiler::getWrite(const Write &write) {
     llvm::Value *int_format = builder.CreateGlobalStringPtr("%p");
     ret = builder.CreateCall(getCPrintf(), {int_format, func->getArg(1)});
   } else {
-    std::cerr << "Unhandled type for writing: " << arg_ty.toString()
-              << std::endl;
-    __builtin_trap();
+    UNREACHABLE("Unhandled type for writing: %s", arg_ty.toString().c_str());
   }
 
   builder.CreateRet(ret);
@@ -595,7 +703,8 @@ llvm::Value *Compiler::getGet(llvm::IRBuilder<> &builder, const Get &get) {
       builder.CreateGEP(expr_ty, expr,
                         {llvm::Constant::getNullValue(getIntType(32)),
                          getExpr(builder, get.getIdx())});
-  if (get.getType().isCompositeOrArrayType()) return gep;
+  if (get.getType().isCompositeOrArrayType())
+    return gep;
   llvm::Type *res_type = getLLVMType(get.getType());
   return builder.CreateLoad(res_type, gep);
 }
@@ -710,18 +819,19 @@ llvm::Value *Compiler::getCast(llvm::IRBuilder<> &builder, const Cast &cast) {
     }
   }
 
-  // if (const auto *arr_ty = llvm::dyn_cast<ArrayType>(&from)) {
-  //   if (arr_ty->getElemType().isNamedType(kCharTypeName) &&
-  //       to.isNamedType(kStrName))
-  //     return expr;
-  // }
-
-  std::cerr << "Unhandled cast from " << from.toString() << " to "
-            << to.toString() << std::endl;
-  __builtin_trap();
+  UNREACHABLE("Unhandled cast from %s to %s", from.toString().c_str(),
+              to.toString().c_str())
 }
 
 llvm::Value *Compiler::getCall(llvm::IRBuilder<> &builder, const Call &call) {
+  // We should manifest a new callable if any of the arguments are generic, but
+  // don't do this for builtin functions like `write` since we are in charge of
+  // emission.
+  bool should_manifest_callable = call.getFunc().getType().isGeneric();
+
+  if (should_manifest_callable)
+    return ManifestGenericCallable(builder, call);
+
   std::vector<llvm::Value *> args;
   const Type &func_type = call.getFunc().getType();
   bool return_as_arg = ShouldReturnValueAsArgument(func_type.getReturnType());
@@ -739,11 +849,14 @@ llvm::Value *Compiler::getCall(llvm::IRBuilder<> &builder, const Call &call) {
     llvm::Value *val = getExpr(builder, *arg);
     args.push_back(val);
   }
+
   llvm::Value *callable = getExpr(builder, call.getFunc());
+
   llvm::FunctionCallee callee(getLLVMFuncType(call.getFunc()), callable);
 
   llvm::CallInst *ret = builder.CreateCall(callee, args);
   llvm::Function *func = builder.GetInsertBlock()->getParent();
+  assert(func->getSubprogram());
   ret->setDebugLoc(
       llvm::DILocation::get(di_unit_.getContext(), call.getStart().getRow(),
                             call.getStart().getCol(), func->getSubprogram()));
@@ -836,13 +949,12 @@ bool Compile(const std::vector<const Node *> &ast, std::ostream &out,
   Compiler compiler(mod, source);
 
   for (const auto *node : ast) {
-    if (const auto *def = llvm::dyn_cast<Define>(node))
+    if (const auto *def = llvm::dyn_cast<Define>(node)) {
       compiler.CompileDefine(*def);
-    else if (const auto *decl = llvm::dyn_cast<Declare>(node))
+    } else if (const auto *decl = llvm::dyn_cast<Declare>(node)) {
       compiler.CompileDeclare(*decl);
-    else {
-      std::cerr << "Unknown top level entity: " << node->getKind() << std::endl;
-      __builtin_trap();
+    } else {
+      UNREACHABLE("Unknown top level entity: %u", node->getKind());
     }
   }
 

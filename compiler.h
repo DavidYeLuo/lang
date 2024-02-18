@@ -8,6 +8,7 @@
 #include <string>
 
 #include "ast.h"
+#include "astbuilder.h"
 #include "llvm/Analysis/CGSCCPassManager.h"
 #include "llvm/Analysis/LoopAnalysisManager.h"
 #include "llvm/IR/DIBuilder.h"
@@ -58,6 +59,12 @@ class Compiler {
   void CompileDeclare(const Declare &declare);
 
   std::string Mangle(const Type &type) const;
+  std::string Mangle(std::string_view name, const Type &type) const {
+    std::string s(name);
+    s += "_";
+    s += Mangle(type);
+    return s;
+  }
 
   llvm::Value *getExpr(llvm::IRBuilder<> &builder, const Expr &expr);
   // Generate code that checks if the resulting expression value is equal to
@@ -69,7 +76,7 @@ class Compiler {
   llvm::Value *getKeep(llvm::IRBuilder<> &builder, const Keep &keep);
   llvm::Value *getCall(llvm::IRBuilder<> &builder, const Call &call);
   llvm::Value *getZero(llvm::IRBuilder<> &, const Zero &);
-  llvm::Value *getWrite(const Write &write);
+  llvm::Value *ManifestWrite(const Declare &write);
   llvm::Value *getReadc(llvm::IRBuilder<> &builder, const Readc &readc);
   llvm::Value *getBinOp(llvm::IRBuilder<> &builder, const BinOp &binop);
   llvm::Value *getIf(llvm::IRBuilder<> &builder, const If &);
@@ -88,6 +95,13 @@ class Compiler {
   llvm::Type *getLLVMType(const NamedType &type) const;
   llvm::Type *getLLVMType(const CompositeType &ty) const;
   llvm::Type *getLLVMType(const ArrayType &ty) const;
+  llvm::Type *getLLVMType(const CallableType &ty) const {
+    return getLLVMFuncType(ty);
+  }
+  llvm::Type *getLLVMType(const GenericType &ty) const {
+    UNREACHABLE("Generic types should not be directly used for code emission.");
+    return nullptr;
+  }
   llvm::FunctionType *getLLVMFuncType(const CallableType &ty) const;
   llvm::FunctionType *getLLVMFuncType(const Type &ty) const {
     return getLLVMFuncType(llvm::cast<CallableType>(ty));
@@ -130,9 +144,11 @@ class Compiler {
   void DoStore(llvm::IRBuilder<> &builder, llvm::Value *store_ptr,
                const Expr &expr);
 
-  void FillFuncBody(const Callable &callable, llvm::Function *func);
+  void FillFuncBody(const Callable &callable, llvm::Function *func,
+                    std::string_view name);
 
-  // llvm::DISubroutineType *CreateFunctionType(size_t num_args);
+  llvm::Value *ManifestGenericCallable(llvm::IRBuilder<> &, const Call &);
+
   llvm::DIType *getDIType(const Type &type) {
     switch (type.getKind()) {
 #define TYPE(name)      \
@@ -151,6 +167,8 @@ class Compiler {
   llvm::DIBuilder di_builder_;
   llvm::DIFile &di_unit_;
   llvm::DICompileUnit &di_cu_;
+  std::map<const Arg *, const Arg *> applied_generic_exprs_;
+  std::map<const Callable *, std::string_view> named_generic_callables_;
 };
 
 bool Compile(const std::vector<const Node *> &ast, std::string_view outfile,

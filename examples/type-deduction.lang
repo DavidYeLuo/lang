@@ -1,0 +1,11 @@
+def writeln = \IO io [256 x char] s -> IO
+  let io2 = IO call write io s end
+  call write io2 "\n" end
+
+def writeln = \IO io int i -> IO
+  let io2 = IO call write io i end
+  call write io2 "\n" end
+
+def main = \IO io -> IO
+  let io2 = IO call writeln io CAST [256 x char] "abc" end
+  call writeln io2 123 end

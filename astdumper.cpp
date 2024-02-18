@@ -6,20 +6,16 @@
 
 namespace lang {
 
-void ASTDumper::Dump(const Node &node) {
+void ASTDumper::Visit(const Node &node) {
   if (visited_.find(&node) != visited_.end()) {
-    Pad() << "..." << &node << "...\n";
+    Pad() << "... " << Node::AsString(node.getKind()) << " " << &node
+          << " ...\n";
     return;
   }
 
   visited_.insert(&node);
 
-  switch (node.getKind()) {
-#define NODE(name)      \
-  case Node::NK_##name: \
-    return Dump(llvm::cast<name>(node));
-#include "nodes.def"
-  }
+  ASTVisitor::Visit(node);
 }
 
 std::ostream &ASTDumper::Pad() {
@@ -27,34 +23,34 @@ std::ostream &ASTDumper::Pad() {
   return out_;
 }
 
-void ASTDumper::Dump(const Define &define) {
+void ASTDumper::Visit(const Define &define) {
   Pad() << "Define " << &define << " name=" << define.getName() << "\n";
   Indent();
-  Dump(define.getBody());
+  Visit(define.getBody());
   Dedent();
 }
 
-void ASTDumper::Dump(const Declare &declare) {
+void ASTDumper::Visit(const Declare &declare) {
   Pad() << "Declare " << &declare << " name=" << declare.getName()
         << " type=" << declare.getType().toString() << "\n";
 }
 
-void ASTDumper::Dump(const Let &let) {
+void ASTDumper::Visit(const Let &let) {
   Pad() << "Let name=" << let.getName() << " " << &let << "\n";
   Indent();
-  Dump(let.getExpr());
+  Visit(let.getExpr());
   Dedent();
 }
 
-void ASTDumper::Dump(const Keep &keep) {
+void ASTDumper::Visit(const Keep &keep) {
   Pad() << "Keep name=" << keep.getName() << " " << &keep << "\n";
   Indent();
-  Dump(keep.getExpr());
-  Dump(keep.getBody());
+  Visit(keep.getExpr());
+  Visit(keep.getBody());
   Dedent();
 }
 
-void ASTDumper::Dump(const Callable &callable) {
+void ASTDumper::Visit(const Callable &callable) {
   const auto &callable_type = llvm::cast<CallableType>(callable.getType());
   Pad() << "Callable " << callable_type.toString() << " " << &callable << "\n";
   Indent();
@@ -63,119 +59,125 @@ void ASTDumper::Dump(const Callable &callable) {
   Indent();
   for (size_t i = 0; i < callable.getNumArgs(); ++i) {
     Pad() << callable.getArgName(i) << " "
-          << callable_type.getArgType(i).toString() << "\n";
+          << callable_type.getArgType(i).toString() << " "
+          << &callable.getArg(i) << "\n";
   }
   Dedent();
 
   Pad() << "return:\n";
   Indent();
-  Dump(callable.getBody());
+  if (callable.hasBody())
+    Visit(callable.getBody());
+  else
+    Pad() << "<still constructing this callable body>\n";
   Dedent();
 
   Dedent();
 }
 
-void ASTDumper::Dump(const Cast &cast) {
+void ASTDumper::Visit(const Cast &cast) {
   Pad() << "Cast " << &cast << " " << cast.getType().toString() << "\n";
   Indent();
-  Dump(cast.getExpr());
+  Visit(cast.getExpr());
   Dedent();
 }
 
-void ASTDumper::Dump(const Write &write) {
-  Pad() << "Write " << &write << " " << write.getType().toString() << "\n";
-}
-
-void ASTDumper::Dump(const Readc &readc) {
+void ASTDumper::Visit(const Readc &readc) {
   Pad() << "Readc " << &readc << " " << readc.getType().toString() << "\n";
 }
 
-void ASTDumper::Dump(const Call &call) {
+void ASTDumper::Visit(const Call &call) {
   Pad() << "Call " << &call << "\n";
   Indent();
 
-  Dump(call.getFunc());
+  Visit(call.getFunc());
 
   Pad() << "args:\n";
 
   Indent();
   for (const Expr *arg : call.getArgs()) {
-    Dump(*arg);
+    Visit(*arg);
   }
   Dedent();
 
   Dedent();
 }
 
-void ASTDumper::Dump(const Zero &zero) {
+void ASTDumper::Visit(const Zero &zero) {
   Pad() << "Zero " << &zero << " " << zero.getType().toString();
 }
 
-void ASTDumper::Dump(const Composite &comp) {
+void ASTDumper::Visit(const Composite &comp) {
   Pad() << "Composite " << &comp << "\n";
   Indent();
 
   for (const Expr *elem : comp.getElems()) {
-    Dump(*elem);
+    Visit(*elem);
   }
 
   Dedent();
 }
 
-void ASTDumper::Dump(const Set &set) {
+void ASTDumper::Visit(const Set &set) {
   Pad() << "Set " << &set << " " << set.getType().toString() << "\n";
   Indent();
-  Dump(set.getExpr());
-  Dump(set.getIdx());
-  Dump(set.getStore());
+  Visit(set.getExpr());
+  Visit(set.getIdx());
+  Visit(set.getStore());
   Dedent();
 }
 
-void ASTDumper::Dump(const Get &get) {
+void ASTDumper::Visit(const Get &get) {
   Pad() << "Get " << &get << " " << get.getType().toString() << "\n";
   Indent();
-  Dump(get.getExpr());
-  Dump(get.getIdx());
+  Visit(get.getExpr());
+  Visit(get.getIdx());
   Dedent();
 }
 
-void ASTDumper::Dump(const Int &i) { Pad() << "Int " << i.getInt() << "\n"; }
+void ASTDumper::Visit(const Int &i) { Pad() << "Int " << i.getInt() << "\n"; }
 
-void ASTDumper::Dump(const Str &s) { Pad() << "Str `" << s.get() << "`\n"; }
+void ASTDumper::Visit(const Str &s) {
+  if (s.get() == "\n")
+    Pad() << "Str `\\n`\n";
+  else
+    Pad() << "Str `" << s.get() << "`\n";
+}
 
-void ASTDumper::Dump(const Char &c) {
+void ASTDumper::Visit(const Char &c) {
   Pad() << "Char `" << c.getChar() << "`\n";
 }
 
-void ASTDumper::Dump(const Bool &b) { Pad() << "Bool `" << b.get() << "`\n"; }
+void ASTDumper::Visit(const Bool &b) { Pad() << "Bool `" << b.get() << "`\n"; }
 
-void ASTDumper::Dump(const If &if_expr) {
+void ASTDumper::Visit(const If &if_expr) {
   Pad() << "If " << &if_expr << "\n";
   Indent();
 
   Pad() << "cond:\n";
   Indent();
-  Dump(if_expr.getCond());
+  Visit(if_expr.getCond());
   Dedent();
 
   Pad() << "if body:\n";
   Indent();
-  Dump(if_expr.getIf());
+  Visit(if_expr.getIf());
   Dedent();
 
   Pad() << "else body:\n";
   Indent();
-  Dump(if_expr.getElse());
+  Visit(if_expr.getElse());
   Dedent();
 
   Dedent();
 }
 
-void ASTDumper::Dump(const Arg &arg) {
-  Pad() << "Arg #" << arg.getArgNo() << " " << &arg << "\n";
+void ASTDumper::Visit(const Arg &arg) {
+  Pad() << "Arg #" << arg.getArgNo() << " " << arg.getType().toString() << " "
+        << &arg << " (parent callable " << &arg.getParent() << ")\n";
 }
 
-void ASTDumper::Dump(const BinOp &binop) {
+void ASTDumper::Visit(const BinOp &binop) {
   std::string op;
   switch (binop.getOp()) {
     case BinOp::OK_Sub:
@@ -203,8 +205,8 @@ void ASTDumper::Dump(const BinOp &binop) {
   Pad() << "BinOp " << op << " " << &binop << "\n";
   Indent();
 
-  Dump(binop.getLHS());
-  Dump(binop.getRHS());
+  Visit(binop.getLHS());
+  Visit(binop.getRHS());
 
   Dedent();
 }

@@ -6,21 +6,22 @@
 #include <set>
 
 #include "ast.h"
+#include "astvisitor.h"
 
 namespace lang {
 
-class ASTDumper {
+class ASTDumper : public ASTVisitor<> {
  public:
   ASTDumper(const Node &node, std::ostream &out) : node_(node), out_(out) {}
 
   void Dump() {
     visited_.clear();
-    Dump(node_);
+    Visit(node_);
   }
 
  private:
-  void Dump(const Node &node);
-#define NODE(name) void Dump(const name &);
+  void Visit(const Node &node) override;
+#define NODE(name) void Visit(const name &) override;
 #include "nodes.def"
 
   std::ostream &Pad();

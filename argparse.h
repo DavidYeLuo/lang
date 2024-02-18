@@ -128,7 +128,8 @@ class ArgParser {
     if (pos_arg != pos_args_.end()) {
       auto idx = pos_arg - pos_args_.begin() + 1;  // +1 since argv[0] is the
                                                    // executable.
-      if (idx < argc_) return std::make_unique<T>(argv_[idx]);
+      if (idx < argc_)
+        return std::make_unique<T>(argv_[idx]);
 
       // See if this has a default callback.
       const Argument<T> &arg =
@@ -150,7 +151,8 @@ class ArgParser {
           if (param.starts_with("-") && param.size() == 2) {
             // This is a short name. Find the corresponding long name.
             auto found_name = shortname_map_.find(param.at(1));
-            if (found_name == shortname_map_.end()) return false;
+            if (found_name == shortname_map_.end())
+              return false;
 
             return argname == found_name->second;
           }
@@ -158,7 +160,8 @@ class ArgParser {
           return param.starts_with("--") && param.substr(2) == argname;
         }();
 
-        if (!found_flag) continue;
+        if (!found_flag)
+          continue;
 
         // Found it. Check the modes.
         const auto &arg =
@@ -171,7 +174,8 @@ class ArgParser {
         }
 
         // Default mode. Get the next argument.
-        if (i + 1 < argc_) return std::make_unique<T>(argv_[i + 1]);
+        if (i + 1 < argc_)
+          return std::make_unique<T>(argv_[i + 1]);
 
         // Can't get next argument because this is the last parameter. Check if
         // there's a default callable.
@@ -202,7 +206,8 @@ class ArgParser {
 
       // If this is an optional argument, the default value is always null. This
       // is WAI and doesn't mean we should throw an error.
-      if (found_opt_arg != opt_args_.end()) return nullptr;
+      if (found_opt_arg != opt_args_.end())
+        return nullptr;
     }
 
     err_ << "Unregistered type for `" << argname

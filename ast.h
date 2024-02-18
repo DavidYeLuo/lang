@@ -1,6 +1,7 @@
 #ifndef AST_H_
 #define AST_H_
 
+#include <algorithm>
 #include <array>
 #include <cassert>
 #include <sstream>
@@ -35,10 +36,20 @@ class Node {
 #include "nodes.def"
   };
 
+  static std::string AsString(Kind kind) {
+    switch (kind) {
+#define NODE(name) \
+  case NK_##name:  \
+    return #name;
+#include "nodes.def"
+    }
+  }
+
   Node(Kind kind, const SourceLocation &start) : kind_(kind), start_(start) {}
   virtual ~Node() = default;
   Kind getKind() const { return kind_; }
   const SourceLocation &getStart() const { return start_; }
+  std::string getNodeKindString() const { return AsString(kind_); }
 
  private:
   const Kind kind_;
@@ -64,6 +75,12 @@ class Type {
   bool isBuiltinType() const;
   bool isCompositeOrArrayType() const;
   bool isCharArray() const;
+
+  // A type is generic if it is a generic type or has members or arguments that
+  // are generic. That is, this has some dependence on a generic type.
+  virtual bool isGeneric() const = 0;
+  bool isGenericCallable() const;
+
   // bool isNoneType() const {
   //   return isNamedType("none");
   // }
@@ -73,13 +90,23 @@ class Type {
   const Kind kind_;
 };
 
+class GenericType : public Type {
+ public:
+  GenericType() : Type(TK_GenericType) {}
+  std::string toString() const override { return "GENERIC"; }
+  bool isGeneric() const override { return true; }
+
+  static bool classof(const Type *type) {
+    return type->getKind() == TK_GenericType;
+  }
+};
+
 class NamedType : public Type {
  public:
   NamedType(std::string_view name) : Type(TK_NamedType), name_(name) {}
-
   std::string_view getName() const { return name_; }
-
   std::string toString() const override { return name_; }
+  bool isGeneric() const override { return false; }
 
   static bool classof(const Type *type) {
     return type->getKind() == TK_NamedType;
@@ -92,12 +119,18 @@ class NamedType : public Type {
 class CallableType : public Type {
  public:
   CallableType(const Type &ret_type, const std::vector<const Type *> &arg_types)
-      : Type(TK_CallableType), ret_type_(ret_type), arg_types_(arg_types) {}
+      : Type(TK_CallableType), ret_type_(ret_type), arg_types_(arg_types) {
+    assert(!ret_type.isGeneric());
+  }
 
   const Type &getReturnType() const { return ret_type_; }
   const auto &getArgTypes() const { return arg_types_; }
   size_t getNumArgs() const { return arg_types_.size(); }
   const auto &getArgType(size_t i) const { return *arg_types_.at(i); }
+  bool isGeneric() const override {
+    return std::ranges::any_of(arg_types_,
+                               [](const Type *ty) { return ty->isGeneric(); });
+  }
 
   static bool classof(const Type *type) {
     return type->getKind() == TK_CallableType;
@@ -127,6 +160,7 @@ class ArrayType : public Type {
     return type->getKind() == TK_ArrayType;
   }
 
+  bool isGeneric() const override { return type_.isGeneric(); }
   size_t getNumElems() const { return num_; }
   const Type &getElemType() const { return type_; }
 
@@ -165,6 +199,10 @@ class CompositeType : public Type {
   const auto &getTypes() const { return types_; }
   size_t getNumTypes() const { return types_.size(); }
   const Type &getTypeAt(size_t i) const { return *types_.at(i); }
+  bool isGeneric() const override {
+    return std::ranges::any_of(types_,
+                               [](const Type *ty) { return ty->isGeneric(); });
+  }
 
  private:
   const std::vector<const Type *> types_;
@@ -192,6 +230,7 @@ class Define : public Node {
 
   std::string_view getName() const { return name_; }
   const Expr &getBody() const { return body_; }
+  bool isGenericCallable() const { return body_.getType().isGenericCallable(); }
 
   static bool classof(const Node *node) { return node->getKind() == NK_Define; }
 
@@ -302,28 +341,69 @@ class Keep : public Expr {
   const Expr &expr_, &body_;
 };
 
+class Callable;
+
+class Arg : public Expr {
+ public:
+  Arg(const SourceLocation &start, const Type &type, size_t arg_no)
+      : Expr(NK_Arg, start, type), arg_no_(arg_no) {}
+
+  static bool classof(const Node *node) { return node->getKind() == NK_Arg; }
+  size_t getArgNo() const { return arg_no_; }
+  const Callable &getParent() const { return *parent_; }
+
+ private:
+  friend class ASTBuilder;
+
+  void setParent(const Callable &parent) { parent_ = &parent; }
+
+  const size_t arg_no_;
+  const Callable *parent_;
+};
+
 class CallableBase : public Expr {
  public:
   CallableBase(const SourceLocation &start, const CallableType &type,
-               const std::vector<std::string> &arg_names)
-      : Expr(NK_Callable, start, type), arg_names_(arg_names) {
+               const std::vector<std::string> &arg_names,
+               const std::vector<const Arg *> &args)
+      : Expr(NK_Callable, start, type), arg_names_(arg_names), args_(args) {
     assert(type.getArgTypes().size() == arg_names.size() &&
            "Differring number of argument names and types.");
+    assert(arg_names.size() == args_.size());
+  }
+
+  static bool classof(const Node *) {
+    UNREACHABLE(
+        "We should never cast to CallableBase. Instead cast to Callable.");
+  }
+
+  const CallableType &getType() const {
+    return llvm::cast<CallableType>(Expr::getType());
+  }
+
+  std::vector<SourceLocation> getArgLocs() const {
+    std::vector<SourceLocation> locs;
+    for (const Arg *arg : args_) locs.push_back(arg->getStart());
+    return locs;
   }
 
   const auto &getArgNames() const { return arg_names_; }
   std::string_view getArgName(size_t i) const { return arg_names_[i]; }
   size_t getNumArgs() const { return arg_names_.size(); }
+  const auto &getArgs() const { return args_; }
+  const Arg &getArg(size_t i) const { return *args_.at(i); }
 
  private:
   const std::vector<std::string> arg_names_;
+  const std::vector<const Arg *> args_;
 };
 
 class Callable : public CallableBase {
  public:
   Callable(const SourceLocation &start, const CallableType &type,
-           const Expr &body, const std::vector<std::string> &arg_names)
-      : CallableBase(start, type, arg_names), body_(&body) {}
+           const Expr &body, const std::vector<std::string> &arg_names,
+           const std::vector<const Arg *> &args)
+      : CallableBase(start, type, arg_names, args), body_(&body) {}
 
   const Expr &getBody() const { return *body_; }
   static bool classof(const Node *node) {
@@ -332,15 +412,22 @@ class Callable : public CallableBase {
 
  private:
   friend class ASTBuilder;
+  friend class ASTDumper;
 
   Callable(const SourceLocation &start, const CallableType &type,
-           const std::vector<std::string> &arg_names)
-      : CallableBase(start, type, arg_names) {}
+           const std::vector<std::string> &arg_names,
+           const std::vector<const Arg *> &args)
+      : CallableBase(start, type, arg_names, args), body_(nullptr) {}
 
   void setBody(const Expr &body) { body_ = &body; }
 
+  // We need this exlcusively for ASTDumper where we sometimes want to print a
+  // node but if we decide to dump while in the moddle of the `getCallable`
+  // callback which constructs the body, we won't have a body yet to dump. So we
+  // should just check if we have a body in the dumper before printing.
+  bool hasBody() const { return body_; }
+
   const Expr *body_;
-  const std::vector<std::string> arg_names_;
 };
 
 class Cast : public Expr {
@@ -354,22 +441,6 @@ class Cast : public Expr {
 
  private:
   const Expr &expr_;
-};
-
-class Write : public Expr {
- public:
-  Write(const SourceLocation &start, const Type &type)
-      : Expr(NK_Write, start, type) {
-    assert(CheckType(type));
-  }
-
-  static bool classof(const Node *node) { return node->getKind() == NK_Write; }
-  const Type &getArgType() const {
-    return *llvm::cast<CallableType>(getType()).getArgTypes().at(1);
-  }
-
- private:
-  static bool CheckType(const Type &type);
 };
 
 class Readc : public Expr {
@@ -401,11 +472,13 @@ class Call : public Expr {
   const Expr &getFunc() const { return func_; }
   const std::vector<const Expr *> &getArgs() const { return args_; }
   bool isPure() const { return pure_; }
+  size_t getNumArgs() const { return args_.size(); }
+  const Expr &getArgAt(size_t i) const { return *args_.at(i); }
 
  private:
   const Expr &func_;
   const std::vector<const Expr *> args_;
-  bool pure_;
+  const bool pure_;
 };
 
 class Zero : public Expr {
@@ -515,18 +588,6 @@ class If : public Expr {
 
  private:
   const Expr &cond_, &if_body_, &else_body_;
-};
-
-class Arg : public Expr {
- public:
-  Arg(const SourceLocation &start, const Type &type, size_t arg_no)
-      : Expr(NK_Arg, start, type), arg_no_(arg_no) {}
-  static bool classof(const Node *node) { return node->getKind() == NK_Arg; }
-
-  size_t getArgNo() const { return arg_no_; }
-
- private:
-  size_t arg_no_;
 };
 
 }  // namespace lang

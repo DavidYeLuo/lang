@@ -13,6 +13,7 @@
 TYPE_FIRST(NamedType)
 TYPE(CompositeType)
 TYPE(ArrayType)
+TYPE(GenericType)
 TYPE_LAST(CallableType)
 
 #undef TYPE

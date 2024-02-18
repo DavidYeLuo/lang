@@ -1,0 +1,8 @@
+def add_x = \int x -> \int -> int
+  \int y -> int ADD x y
+
+def main = \IO io -> IO
+  let add_1 = \int -> int add_x(1)
+  let add_2 = \int -> int add_x(2)
+  let res = int add_1(add_2(3))
+  call write io res end
