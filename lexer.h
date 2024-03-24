@@ -15,6 +15,7 @@ class Token {
   enum TokenKind {
     TK_Def,
     TK_Decl,
+    TK_CDecl,
     TK_Identifier,
     TK_Lambda,
     TK_Assign,
@@ -51,6 +52,7 @@ class Token {
     TK_MOD,
     TK_End,
     TK_GENERIC,
+    TK_GENERIC_REMAINING,
     TK_EOF,
   };
 

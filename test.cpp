@@ -54,8 +54,6 @@ int RunCommand(std::string_view cmd, std::string *out = nullptr,
   if (err)
     sys_cmd.append(" 2>").append(err_file.getPath());
 
-  std::cerr << "Running cmd: " << sys_cmd << std::endl;
-
   int res = system(sys_cmd.c_str());
   if (out)
     *out = out_file.getContents();
@@ -67,12 +65,13 @@ int RunCommand(std::string_view cmd, std::string *out = nullptr,
   return res;
 }
 
-void BuildAndCheckOutput(const std::vector<const lang::Node *> &ast,
-                         std::string_view expected,
+void BuildAndCheckOutput(lang::Module &mod, std::string_view expected,
                          std::string *in_text = nullptr) {
   constexpr std::string_view kOut = "a.out";
   TmpFile obj_file;
-  ASSERT_TRUE(lang::Compile(ast, obj_file.getPath(), lang::File));
+  lang::ASTBuilder builder;
+  lang::Lower(mod, builder);
+  ASSERT_TRUE(lang::Compile(mod, obj_file.getPath(), lang::File));
   ASSERT_EQ(RunCommand(std::format("clang {} -o {}", obj_file.getPath(), kOut)),
             0);
 
@@ -89,9 +88,9 @@ void BuildAndCheckOutput(std::istream &input, std::string_view expected,
                          std::string *in_text = nullptr) {
   lang::Lexer lexer(input);
   lang::Parser parser(lexer);
-  auto maybe_ast = parser.Parse();
-  ASSERT_FALSE(maybe_ast.hasError()) << maybe_ast.getError();
-  BuildAndCheckOutput(*maybe_ast, expected, in_text);
+  auto maybe_mod = parser.Parse();
+  ASSERT_FALSE(maybe_mod.hasError()) << maybe_mod.getError();
+  BuildAndCheckOutput(**maybe_mod, expected, in_text);
 }
 
 void BuildAndCheckOutput(std::string_view code, std::string_view expected,
@@ -101,91 +100,12 @@ void BuildAndCheckOutput(std::string_view code, std::string_view expected,
   BuildAndCheckOutput(input, expected, in_text);
 }
 
-constexpr char kHelloWorldStr[] =
-    "def main = \\IO io -> IO\n"
-    "  call write io \"Hello world\\n\" end";
-
-TEST(Lexer, HelloWorld) {
-  using lang::Token;
-
-  std::stringstream input(kHelloWorldStr);
-  lang::Lexer lexer(input);
-
-  using lang::pos_t;
-  auto CheckToken = [](const Token &tok, lang::Token::TokenKind expected_kind,
-                       pos_t expected_start_row, pos_t expected_start_col,
-                       pos_t expected_end_row, pos_t expected_end_col,
-                       std::string_view expected_chars) {
-    ASSERT_EQ(tok.getKind(), expected_kind);
-    ASSERT_EQ(tok.getStart().getRow(), expected_start_row);
-    ASSERT_EQ(tok.getStart().getCol(), expected_start_col);
-    ASSERT_EQ(tok.getEnd().getRow(), expected_end_row);
-    ASSERT_EQ(tok.getEnd().getCol(), expected_end_col);
-    ASSERT_EQ(tok.getChars(), expected_chars);
-  };
-
-  CheckToken(*lexer.Lex(), Token::TK_Def, 1, 1, 1, 4, "def");
-  CheckToken(*lexer.Lex(), Token::TK_Identifier, 1, 5, 1, 9, "main");
-  CheckToken(*lexer.Lex(), Token::TK_Assign, 1, 10, 1, 11, "=");
-  CheckToken(*lexer.Lex(), Token::TK_Lambda, 1, 12, 1, 13, "\\");
-  CheckToken(*lexer.Lex(), Token::TK_Identifier, 1, 13, 1, 15, "IO");
-  CheckToken(*lexer.Lex(), Token::TK_Identifier, 1, 16, 1, 18, "io");
-  CheckToken(*lexer.Lex(), Token::TK_Arrow, 1, 19, 1, 21, "->");
-  CheckToken(*lexer.Lex(), Token::TK_Identifier, 1, 22, 1, 24, "IO");
-  CheckToken(*lexer.Lex(), Token::TK_Call, 2, 3, 2, 7, "call");
-  CheckToken(*lexer.Lex(), Token::TK_Identifier, 2, 8, 2, 13, "write");
-  CheckToken(*lexer.Lex(), Token::TK_Identifier, 2, 14, 2, 16, "io");
-  CheckToken(*lexer.Lex(), Token::TK_Str, 2, 17, 2, 32, "\"Hello world\n\"");
-  CheckToken(*lexer.Lex(), Token::TK_End, 2, 33, 2, 36, "end");
-  ASSERT_EQ(lexer.Lex()->getKind(), Token::TK_EOF);
-}
-
-TEST(Errors, ShowLineInError) {
-  constexpr char kMissingType[] =
+TEST(E2E, HelloWorld) {
+  constexpr char kHelloWorldStr[] =
       "def main = \\IO io -> IO\n"
-      "  let i = 2\n"
-      "  io";
-  constexpr std::string_view kExpectedError =
-      "2:11: Expected a type; instead found `2`\n"
-      "  let i = 2\n"
-      "          ^";
-  std::stringstream input;
-  input << kMissingType;
-  lang::Lexer lexer(input);
-  lang::Parser parser(lexer);
-  auto res = parser.Parse();
-  ASSERT_TRUE(res.hasError());
-  ASSERT_EQ(res.getError(), kExpectedError);
+      "  call write io \"Hello world\\n\" end";
+  BuildAndCheckOutput(kHelloWorldStr, "Hello world\n");
 }
-
-TEST(Errors, ReturnTypeMismatch) {
-  constexpr char kMismatch[] = "def main = \\IO io -> IO 2\n";
-  constexpr std::string_view kExpectedError =
-      "1:25: Expression type mismatch; found `int` but expected `IO`";
-  std::stringstream input;
-  input << kMismatch;
-  lang::Lexer lexer(input);
-  lang::Parser parser(lexer);
-  auto res = parser.Parse();
-  ASSERT_TRUE(res.hasError());
-  ASSERT_TRUE(res.getError().starts_with(kExpectedError)) << res.getError();
-}
-
-TEST(Errors, MultipleCallableOverrides) {
-  std::ifstream input("examples/multiple-callable-overrides.lang");
-  constexpr std::string_view kExpectedError =
-      "9:15: Callable `writeln` with arg types `IO int GENERIC ` is handled by "
-      "another callable\n"
-      "def writeln = \\IO io int arg1 GENERIC arg2 -> IO\n"
-      "              ^\n";
-  lang::Lexer lexer(input);
-  lang::Parser parser(lexer);
-  auto res = parser.Parse();
-  ASSERT_TRUE(res.hasError());
-  ASSERT_TRUE(res.getError().starts_with(kExpectedError)) << res.getError();
-}
-
-TEST(E2E, HelloWorld) { BuildAndCheckOutput(kHelloWorldStr, "Hello world\n"); }
 
 class LangCompilerE2E : public testing::Test {
  public:
@@ -197,18 +117,18 @@ class LangCompilerE2E : public testing::Test {
     // use the second stage to create this, so let's delete it first.
     std::filesystem::remove("obj.obj");
 
-    ASSERT_EQ(RunCommand("./lang examples/compiler.lang"), 0);
-    ASSERT_EQ(
-        RunCommand(std::format("clang examples/compiler.lang.obj $(llvm-config "
-                               "--ldflags --system-libs --libs core) -o {}",
-                               kLangCompilerName)),
-        0);
+    ASSERT_EQ(RunCommand("./lang " EXAMPLES_DIR "/compiler.lang"), 0);
+    ASSERT_EQ(RunCommand(std::format(
+                  "clang " EXAMPLES_DIR "/compiler.lang.obj $(llvm-config "
+                  "--ldflags --system-libs --libs core) -o {}",
+                  kLangCompilerName)),
+              0);
   }
 };
 
 // Test building hello-world.lang with the compiler in the language.
 TEST_F(LangCompilerE2E, HelloWorld) {
-  std::ifstream t("examples/hello-world.lang");
+  std::ifstream t(EXAMPLES_DIR "/hello-world.lang");
   std::stringstream buffer;
   buffer << t.rdbuf();
   std::string in(buffer.str());
@@ -226,7 +146,7 @@ TEST_F(LangCompilerE2E, HelloWorld) {
 }
 
 TEST(E2E, HelloWorldLet) {
-  std::ifstream input("examples/hello-world-let.lang");
+  std::ifstream input(EXAMPLES_DIR "/hello-world-let.lang");
   BuildAndCheckOutput(input, "Hello world\n");
 }
 
@@ -253,6 +173,7 @@ TEST(E2E, If) {
 
 TEST(E2E, Fib) {
   constexpr char kFibStr[] =
+      "decl fib = \\int -> int              \n"
       "def fib = \\int n -> int             \n"
       "  if LT n 2                          \n"
       "    n                                \n"
@@ -269,52 +190,17 @@ TEST(E2E, Fib) {
 }
 
 TEST(E2E, FibNonRecurse) {
-  constexpr char kFibNonRecurse[] =
-      "\
-def fib_impl = \\int lim int x int fib_n_1 int fib_n -> int \
-  if EQ x lim                                               \
-    fib_n                                                   \
-  else                                                      \
-    call fib_impl                                           \
-      lim                                                   \
-      ADD x 1                                               \
-      fib_n                                                 \
-      ADD fib_n fib_n_1                                     \
-    end                                                     \
-                                                            \
-def fib = \\int n -> int                                    \
-  if LT n 2                                                 \
-    n                                                       \
-  else                                                      \
-    call fib_impl n 2 1 1 end                               \
-                                                            \
-def main = \\IO io -> IO                                    \
-  let x = int call fib 10 end                               \
-  call write io x end";
-
-  BuildAndCheckOutput(kFibNonRecurse, "55");
+  std::ifstream input(EXAMPLES_DIR "/fib-non-recurse.lang");
+  BuildAndCheckOutput(input, "55");
 }
 
 TEST(E2E, ProjectEuler1) {
-  constexpr char kPE1[] =
-      "\
-def sum = \\int lim int x int accum -> int  \
-  if GE x lim                               \
-    accum                                   \
-  else                                      \
-    if OR EQ MOD x 3 0 EQ MOD x 5 0         \
-      call sum lim ADD x 1 ADD accum x end  \
-    else                                    \
-      call sum lim ADD x 1 accum end        \
-                                            \
-def main = \\IO io -> IO                    \
-  let x = int call sum 1000 0 0 end         \
-  call write io x end";
-  BuildAndCheckOutput(kPE1, "233168");
+  std::ifstream input(EXAMPLES_DIR "/project-euler-1.lang");
+  BuildAndCheckOutput(input, "233168");
 }
 
 TEST(E2E, FuncAsArgument) {
-  std::ifstream input("examples/func-as-argument.lang");
+  std::ifstream input(EXAMPLES_DIR "/func-as-argument.lang");
   BuildAndCheckOutput(input, "11");
 }
 
@@ -333,6 +219,7 @@ def main = \\IO io -> IO \
 TEST(E2E, ReadAllStdin) {
   constexpr char kReadc[] =
       "\
+  decl echo = \\IO -> IO \
   def echo = \\IO io -> IO \
     let x = <IO int> call readc io end \
     let io2 = IO GET IO x 0 \
@@ -349,7 +236,7 @@ TEST(E2E, ReadAllStdin) {
 }
 
 TEST(E2E, Buffer) {
-  std::ifstream input("examples/buffer.lang");
+  std::ifstream input(EXAMPLES_DIR "/buffer.lang");
   constexpr char kExpected[] =
       "abc\n"
       "xyz\n"
@@ -358,7 +245,7 @@ TEST(E2E, Buffer) {
 }
 
 TEST(E2E, PrintChars) {
-  std::ifstream input("examples/composite-type.lang");
+  std::ifstream input(EXAMPLES_DIR "/composite-type.lang");
   constexpr char kExpected[] =
       "97 a\n"
       "98 b\n"
@@ -390,27 +277,27 @@ TEST(E2E, PrintChars) {
 }
 
 TEST(E2E, CharsArrayStr) {
-  std::ifstream input("examples/char-array-str.lang");
+  std::ifstream input(EXAMPLES_DIR "/char-array-str.lang");
   BuildAndCheckOutput(input, "abc\n");
 }
 
 TEST(E2E, ReadSingleToken) {
-  std::ifstream t("examples/hello-world.lang");
+  std::ifstream t(EXAMPLES_DIR "/hello-world.lang");
   std::stringstream buffer;
   buffer << t.rdbuf();
   std::string in(buffer.str());
 
-  std::ifstream input("examples/read-token.lang");
+  std::ifstream input(EXAMPLES_DIR "/read-token.lang");
   BuildAndCheckOutput(input, "def\n", &in);
 }
 
 TEST(E2E, ReadAllTokens) {
-  std::ifstream t("examples/hello-world.lang");
+  std::ifstream t(EXAMPLES_DIR "/hello-world.lang");
   std::stringstream buffer;
   buffer << t.rdbuf();
   std::string in(buffer.str());
 
-  std::ifstream input("examples/read-all-tokens.lang");
+  std::ifstream input(EXAMPLES_DIR "/read-all-tokens.lang");
   constexpr char kExpected[] =
       "def\n"
       "main\n"
@@ -428,35 +315,56 @@ TEST(E2E, ReadAllTokens) {
 }
 
 TEST(E2E, HelloWorldWithComments) {
-  std::ifstream input("examples/hello-world-comments.lang");
+  std::ifstream input(EXAMPLES_DIR "/hello-world-comments.lang");
   BuildAndCheckOutput(input, "Hello world\n");
 }
 
 TEST(RegressionTests, Regression1) {
   // Assert we can compile this normally. Prior, this would hang infinitely in
   // doRAU when replacing a value with itself.
-  std::ifstream input("examples/regression-test-1.lang");
+  std::ifstream input(EXAMPLES_DIR "/regression-test-1.lang");
   lang::Lexer lexer(input);
   lang::Parser parser(lexer);
-  auto maybe_ast = parser.Parse();
-  ASSERT_FALSE(maybe_ast.hasError()) << maybe_ast.getError();
+  auto maybe_mod = parser.Parse();
+  ASSERT_FALSE(maybe_mod.hasError()) << maybe_mod.getError();
   TmpFile obj_file;
-  ASSERT_TRUE(lang::Compile(*maybe_ast, obj_file.getPath(), lang::File));
+  lang::Module &mod = **maybe_mod;
+  lang::ASTBuilder builder;
+  lang::Lower(mod, builder);
+  ASSERT_TRUE(lang::Compile(mod, obj_file.getPath(), lang::File));
 }
 
 TEST(E2E, TypeDeduction) {
-  std::ifstream input("examples/type-deduction.lang");
+  std::ifstream input(EXAMPLES_DIR "/type-deduction.lang");
   BuildAndCheckOutput(input, "abc\n123\n");
 }
 
 TEST(E2E, Metaprogramming) {
-  std::ifstream input("examples/metaprogramming.lang");
+  std::ifstream input(EXAMPLES_DIR "/metaprogramming.lang");
   BuildAndCheckOutput(input, "abc\n123\ndef456\n");
 }
 
 TEST(E2E, AltCallSyntax) {
-  std::ifstream input("examples/alt-call-syntax.lang");
+  std::ifstream input(EXAMPLES_DIR "/alt-call-syntax.lang");
   BuildAndCheckOutput(input, "result is: 55\nabc\n123\ndef456\n");
+}
+
+TEST(E2E, VariadicArgs) {
+  std::ifstream input(EXAMPLES_DIR "/variadic-args.lang");
+  constexpr char kExpected[] =
+      "abc\n"
+      "123\n"
+      "def456789xyz\n";
+  BuildAndCheckOutput(input, kExpected);
+}
+
+TEST(E2E, VariadicArgsOldCallSyntax) {
+  std::ifstream input(EXAMPLES_DIR "/variadic-args-old-call-syntax.lang");
+  constexpr char kExpected[] =
+      "abc\n"
+      "123\n"
+      "def456789xyz\n";
+  BuildAndCheckOutput(input, kExpected);
 }
 
 }  // namespace

@@ -1,3 +1,4 @@
+decl fib_impl = \int int int int -> int
 def fib_impl = \int lim int x int fib_n_1 int fib_n -> int
   if EQ x lim
     fib_n

@@ -4,8 +4,6 @@ Hopefully I don't abandon this one also. This is the furthest I've gotten with
 any personal project.
 
 ```sh
-$ make -j8  # Make the compiler `lang`
-
 # Example hello world.
 $ cat examples/hello-world.lang
 def main = \IO io -> IO
@@ -27,12 +25,11 @@ Hello world
 
 ## Build
 
-Ensure `GTEST_LIB` and `GTEST_HDR` are set as environment variables, otherwise
-they will need to be added to every `make` command. `GTEST_HDR` should point to
-`$GTEST_DIR/googletest/include` and `GTEST_LIB` should point to `$GTEST_DIR/build/lib`.
-
 ```sh
-$ make -j8
+$ mkdir build
+$ cd build
+$ cmake .. -GNinja -DCMAKE_CXX_COMPILER=clang++ -DCMAKE_C_COMPILER=clang -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+$ ninja
 ```
 
 ## Test
@@ -40,6 +37,5 @@ $ make -j8
 This was only tested on x86_64-linux.
 
 ```sh
-$ make test
-$ ./test
+$ ./test  # Inside the build dir.
 ```

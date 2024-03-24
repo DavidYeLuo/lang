@@ -6,7 +6,7 @@
 namespace lang {
 
 template <typename RetTy = void>
-class ASTVisitor {
+class ConstASTVisitor {
  public:
   virtual RetTy Visit(const Node &node) {
     switch (node.getKind()) {
@@ -19,6 +19,23 @@ class ASTVisitor {
 
  protected:
 #define NODE(name) virtual RetTy Visit(const name &) = 0;
+#include "nodes.def"
+};
+
+template <typename RetTy = void>
+class NonConstASTVisitor {
+ public:
+  virtual RetTy Visit(Node &node) {
+    switch (node.getKind()) {
+#define NODE(name)      \
+  case Node::NK_##name: \
+    return Visit(llvm::cast<name>(node));
+#include "nodes.def"
+    }
+  }
+
+ protected:
+#define NODE(name) virtual RetTy Visit(name &) = 0;
 #include "nodes.def"
 };
 

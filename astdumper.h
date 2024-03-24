@@ -10,14 +10,11 @@
 
 namespace lang {
 
-class ASTDumper : public ASTVisitor<> {
+class ASTDumper : public ConstASTVisitor<> {
  public:
-  ASTDumper(const Node &node, std::ostream &out) : node_(node), out_(out) {}
+  ASTDumper(std::ostream &out) : out_(out) {}
 
-  void Dump() {
-    visited_.clear();
-    Visit(node_);
-  }
+  void Dump(const Node &node) { Visit(node); }
 
  private:
   void Visit(const Node &node) override;
@@ -31,13 +28,14 @@ class ASTDumper : public ASTVisitor<> {
     indent_--;
   }
 
-  const Node &node_;
   std::ostream &out_;
   size_t indent_ = 0;
   std::set<const Node *> visited_;
 
   static constexpr char kPadding[] = "  ";
 };
+
+inline void Dump(const Node &node) { ASTDumper(std::cerr).Dump(node); }
 
 }  // namespace lang
 

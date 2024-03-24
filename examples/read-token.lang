@@ -2,6 +2,7 @@ def writeln_str = \IO io [128 x char] s -> IO
   let io2 = IO call write io s end
   call write io2 "\n" end
 
+decl read_token = \IO [128 x char] int -> <[128 x char] IO>
 def read_token = \IO io [128 x char] buff int idx -> <[128 x char] IO>
   let res = <IO int> call readc io end
   let io2 = IO GET IO res 0

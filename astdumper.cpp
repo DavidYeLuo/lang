@@ -15,24 +15,24 @@ void ASTDumper::Visit(const Node &node) {
 
   visited_.insert(&node);
 
-  ASTVisitor::Visit(node);
+  ConstASTVisitor::Visit(node);
 }
 
 std::ostream &ASTDumper::Pad() {
-  for (size_t i = 0; i < indent_; ++i) out_ << kPadding;
+  for (size_t i = 0; i < indent_; ++i)
+    out_ << kPadding;
   return out_;
-}
-
-void ASTDumper::Visit(const Define &define) {
-  Pad() << "Define " << &define << " name=" << define.getName() << "\n";
-  Indent();
-  Visit(define.getBody());
-  Dedent();
 }
 
 void ASTDumper::Visit(const Declare &declare) {
   Pad() << "Declare " << &declare << " name=" << declare.getName()
-        << " type=" << declare.getType().toString() << "\n";
+        << " type=" << declare.getType().toString()
+        << " iswrite=" << declare.isBuiltinWrite() << "\n";
+  if (declare.isDefinition()) {
+    Indent();
+    Visit(declare.getBody());
+    Dedent();
+  }
 }
 
 void ASTDumper::Visit(const Let &let) {
@@ -86,8 +86,30 @@ void ASTDumper::Visit(const Readc &readc) {
   Pad() << "Readc " << &readc << " " << readc.getType().toString() << "\n";
 }
 
+void ASTDumper::Visit(const AmbiguousCall &call) {
+  Pad() << "AmbiguousCall " << &call << " " << call.getStart() << " "
+        << call.getType().toString() << "\n";
+  Indent();
+
+  Pad() << "possible funcs:\n";
+  Indent();
+  for (const Expr *callable : call.getFuncs())
+    Visit(*callable);
+  Dedent();
+
+  Pad() << "args:\n";
+
+  Indent();
+  for (const Expr *arg : call.getArgs())
+    Visit(*arg);
+  Dedent();
+
+  Dedent();
+}
+
 void ASTDumper::Visit(const Call &call) {
-  Pad() << "Call " << &call << "\n";
+  Pad() << "Call " << &call << " " << call.getStart() << " "
+        << call.getType().toString() << "\n";
   Indent();
 
   Visit(call.getFunc());
@@ -138,10 +160,15 @@ void ASTDumper::Visit(const Get &get) {
 void ASTDumper::Visit(const Int &i) { Pad() << "Int " << i.getInt() << "\n"; }
 
 void ASTDumper::Visit(const Str &s) {
-  if (s.get() == "\n")
-    Pad() << "Str `\\n`\n";
-  else
-    Pad() << "Str `" << s.get() << "`\n";
+  std::string cpy;
+  for (char c : s.get()) {
+    if (c == '\n') {
+      cpy += "\\n";
+    } else {
+      cpy.push_back(c);
+    }
+  }
+  Pad() << "Str `" << cpy << "`\n";
 }
 
 void ASTDumper::Visit(const Char &c) {

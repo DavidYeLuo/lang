@@ -16,6 +16,7 @@
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/raw_os_ostream.h"
 #include "llvm/Support/raw_ostream.h"
+#include "mangle.h"
 
 namespace lang {
 
@@ -40,6 +41,10 @@ llvm::DIType *Compiler::getDIType(const NamedType &named_ty) {
                                        llvm::dwarf::DW_ATE_unsigned);
 
   UNREACHABLE("Unhandled named type dwarf ecoding");
+}
+
+llvm::DIType *Compiler::getDIType(const GenericRemainingType &) {
+  UNREACHABLE("Generic types should not be directly used for code emission.");
 }
 
 llvm::DIType *Compiler::getDIType(const GenericType &) {
@@ -75,53 +80,53 @@ llvm::DIType *Compiler::getDIType(const CallableType &callable_ty) {
       di_builder_.getOrCreateTypeArray(EltTys));
 }
 
-void Compiler::CompileDefine(const Define &define) {
+void Compiler::CompileDeclare(const Declare &declare) {
   // Generic functions should never be compiled. Instead, the correct
   // function should be generated with a call to this define.
-  if (define.isGenericCallable()) {
-    if (llvm::isa<Callable>(define.getBody())) {
-      [[maybe_unused]] const auto [it, inserted] =
-          named_generic_callables_.insert(
-              {&llvm::cast<Callable>(define.getBody()), define.getName()});
-      assert(inserted && "Duplicate definitions");
-    }
+  if (declare.isGenericCallable())
     return;
-  }
 
-  if (const auto *func_body = llvm::dyn_cast<Callable>(&define.getBody())) {
-    const auto &func_ty = llvm::cast<CallableType>(func_body->getType());
-    llvm::FunctionType *llvm_func_ty = getLLVMFuncType(func_ty);
+  getDeclare(declare);
+}
+
+llvm::Value *Compiler::getDeclare(const Declare &declare) {
+  if (auto *glob = mod_.getNamedValue(declare.getName()))
+    return glob;
+
+  if (const auto *func_ty = llvm::dyn_cast<CallableType>(&declare.getType())) {
+    llvm::FunctionType *llvm_func_ty = getLLVMFuncType(*func_ty);
 
     llvm::Function *func;
-    if (define.getName() == "main") {
-      assert(func_ty.getReturnType().isNamedType(builtins::kIOTypeName) &&
+    if (declare.getName() == "main") {
+      assert(func_ty->getReturnType().isNamedType(builtins::kIOTypeName) &&
              "Return type of main should be IO");
-      assert(func_ty.getArgTypes().size() == 1 &&
+      assert(func_ty->getArgTypes().size() == 1 &&
              "`main` func should have one argument of IO");
-      assert(func_ty.getArgTypes()[0]->isNamedType(builtins::kIOTypeName) &&
+      assert(func_ty->getArgTypes()[0]->isNamedType(builtins::kIOTypeName) &&
              "First argument to main should be IO");
       func = getMainWrapper(llvm_func_ty);
     } else {
       func =
           llvm::Function::Create(llvm_func_ty, llvm::Function::ExternalLinkage,
-                                 define.getName(), mod_);
+                                 declare.getName(), mod_);
     }
 
-    FillFuncBody(*func_body, func, define.getName());
-  } else {
-    UNREACHABLE("TODO: Handle non-function definitions");
-  }
-}
+    if (!declare.isDefinition()) {
+      processed_exprs_.try_emplace(&declare, func);
+    } else {
+      FillFuncBody(llvm::cast<Callable>(declare.getBody()), func,
+                   declare.getName());
+    }
 
-void Compiler::CompileDeclare(const Declare &declare) {
-  if (llvm::isa<CallableType>(declare.getType())) {
-    llvm::Value *func =
-        mod_.getOrInsertFunction(declare.getName(), getLLVMFuncType(declare))
-            .getCallee();
-    assert(!processed_exprs_.contains(&declare));
-    processed_exprs_.try_emplace(&declare, func);
+    return func;
   } else {
-    mod_.getOrInsertGlobal(declare.getName(), getLLVMType(declare));
+    auto *glob = new llvm::GlobalVariable(
+        mod_, getLLVMType(declare), /*isConstant=*/true,
+        /*Linkage=*/llvm::GlobalValue::ExternalLinkage,
+        /*Initializer=*/nullptr, declare.getName());
+    // FIXME: We need some way of handling constants (expressions that don't
+    // need an IRBuilder).
+    return glob;
   }
 }
 
@@ -197,7 +202,8 @@ llvm::Type *Compiler::getLLVMType(const ArrayType &type) const {
 
 llvm::Type *Compiler::getLLVMType(const CompositeType &type) const {
   std::vector<llvm::Type *> types;
-  for (const Type *ty : type.getTypes()) types.push_back(getLLVMType(*ty));
+  for (const Type *ty : type.getTypes())
+    types.push_back(getLLVMType(*ty));
   return llvm::StructType::create(types);
 }
 
@@ -229,9 +235,8 @@ void Compiler::ReplaceAllUsesWith(llvm::Value *replacement,
   // values of the phi node with the replacement, so instead we need to manually
   // call RAUW on the incoming nodes. Then we can just delete the phi node.
   if (auto *phi = llvm::dyn_cast<llvm::PHINode>(replacing)) {
-    for (llvm::Value *incoming : phi->incoming_values()) {
+    for (llvm::Value *incoming : phi->incoming_values())
       ReplaceAllUsesWith(replacement, incoming);
-    }
   }
 }
 
@@ -274,21 +279,19 @@ llvm::Value *Compiler::ManifestGenericCallable(llvm::IRBuilder<> &builder,
     const auto &new_callable_ty =
         astbuilder.getCallableType(callable_ty.getReturnType(), arg_types);
     dummy_func = &astbuilder.getDeclare(func.getStart(), decl->getName(),
-                                        new_callable_ty);
+                                        new_callable_ty, /*is_write=*/false,
+                                        /*is_cdecl=*/false);
   } else {
     const Callable &callable = llvm::cast<Callable>(func);
 
-    dummy_func = &astbuilder.getCallable(
+    Callable &newcallable = astbuilder.getCallable(
         callable.getStart(), callable.getType().getReturnType(),
-        callable.getArgLocs(), callable.getArgNames(), arg_types,
-        [&](const CallableBase &this_func,
-            const std::vector<const Arg *> &args) -> const Expr & {
-          assert(args.size() == callable.getNumArgs());
-          for (size_t i = 0; i < args.size(); ++i) {
-            applied_generic_exprs_[&callable.getArg(i)] = args.at(i);
-          }
-          return callable.getBody();
-        });
+        callable.getArgLocs(), callable.getArgNames(), arg_types);
+    for (size_t i = 0; i < newcallable.getNumArgs(); ++i) {
+      applied_generic_exprs_[&callable.getArg(i)] = &newcallable.getArg(i);
+    }
+    newcallable.setBody(const_cast<Expr &>(callable.getBody()));
+    dummy_func = &newcallable;
 
     auto found = named_generic_callables_.find(&callable);
     if (found != named_generic_callables_.end()) {
@@ -299,7 +302,8 @@ llvm::Value *Compiler::ManifestGenericCallable(llvm::IRBuilder<> &builder,
 
   assert(!dummy_func->getType().isGeneric());
 
-  Call dummy_call(call.getStart(), call.getType(), *dummy_func, call.getArgs(),
+  Call dummy_call(call.getStart(), call.getType(),
+                  const_cast<Expr &>(*dummy_func), call.getArgs(),
                   call.isPure());
 
   llvm::Value *result = getCall(builder, dummy_call);
@@ -381,42 +385,6 @@ llvm::Value *Compiler::getKeep(llvm::IRBuilder<> &builder, const Keep &keep) {
   return getExpr(builder, keep.getBody());
 }
 
-std::string Compiler::Mangle(const Type &type) const {
-  switch (type.getKind()) {
-    case Type::TK_GenericType: {
-      UNREACHABLE(
-          "Generic types should not be directly used for code emission.");
-    }
-    case Type::TK_NamedType:
-      return std::string(llvm::cast<NamedType>(type).getName());
-    case Type::TK_ArrayType: {
-      const auto &array_ty = llvm::cast<ArrayType>(type);
-      std::stringstream ss;
-      ss << "arr_" << array_ty.getNumElems() << "_"
-         << Mangle(array_ty.getElemType());
-      return ss.str();
-    }
-    case Type::TK_CompositeType: {
-      const auto &composite_ty = llvm::cast<CompositeType>(type);
-      std::stringstream ss;
-      ss << "ct";
-      for (const Type *ty : composite_ty.getTypes()) {
-        ss << "_" << Mangle(*ty);
-      }
-      return ss.str();
-    }
-    case Type::TK_CallableType: {
-      const auto &callable_ty = llvm::cast<CallableType>(type);
-      std::stringstream ss;
-      ss << "ret_" << Mangle(callable_ty.getReturnType());
-      for (size_t i = 0; i < callable_ty.getArgTypes().size(); ++i) {
-        ss << "_arg" << i << "_" << Mangle(*callable_ty.getArgTypes().at(i));
-      }
-      return ss.str();
-    }
-  }
-}
-
 llvm::Function *Compiler::getCGetc() const {
   llvm::FunctionType *c_func_ty = llvm::FunctionType::get(
       getIntType(32), {llvm::PointerType::getUnqual(mod_.getContext())},
@@ -482,10 +450,12 @@ llvm::Value *Compiler::getExprImpl(llvm::IRBuilder<> &builder,
   switch (expr.getKind()) {
     case Node::NK_Declare: {
       const Declare &decl = llvm::cast<Declare>(expr);
-      if (decl.getName() == "write")
+      if (decl.isBuiltinWrite())
         return ManifestWrite(decl);
-      UNREACHABLE("Decl should not be handled like other expressions");
+      return getDeclare(decl);
     }
+    case Node::NK_AmbiguousCall:
+      UNREACHABLE("This should've been resolved during lowering");
     // case Node::NK_None:
     //   return getNone();
     case Node::NK_Get:
@@ -531,10 +501,6 @@ llvm::Value *Compiler::getExprImpl(llvm::IRBuilder<> &builder,
       return getBinOp(builder, llvm::cast<BinOp>(expr));
     case Node::NK_If:
       return getIf(builder, llvm::cast<If>(expr));
-#define NODE(name) case Node::NK_##name:
-#define EXPR(name)
-#include "nodes.def"
-      __builtin_trap();
   }
 }
 
@@ -663,11 +629,13 @@ llvm::Value *Compiler::getZero(llvm::IRBuilder<> &builder, const Zero &zero) {
 }
 
 llvm::Value *Compiler::ManifestWrite(const Declare &write) {
+  assert(write.isBuiltinWrite());
   const Type &type = write.getType();
   const Type &arg_ty = llvm::cast<CallableType>(type).getArgType(1);
   auto *func_ty = llvm::cast<llvm::FunctionType>(getLLVMType(type));
+  std::string name(Mangle("write", type));
   llvm::Function *func = llvm::Function::Create(
-      func_ty, llvm::Function::ExternalLinkage, Mangle("write", arg_ty), mod_);
+      func_ty, llvm::Function::ExternalLinkage, name, mod_);
 
   // Dispatch to a C-style printf.
   llvm::BasicBlock *bb =
@@ -827,10 +795,7 @@ llvm::Value *Compiler::getCall(llvm::IRBuilder<> &builder, const Call &call) {
   // We should manifest a new callable if any of the arguments are generic, but
   // don't do this for builtin functions like `write` since we are in charge of
   // emission.
-  bool should_manifest_callable = call.getFunc().getType().isGeneric();
-
-  if (should_manifest_callable)
-    return ManifestGenericCallable(builder, call);
+  assert(!call.getFunc().getType().isGeneric());
 
   std::vector<llvm::Value *> args;
   const Type &func_type = call.getFunc().getType();
@@ -889,21 +854,20 @@ llvm::Value *Compiler::getComposite(llvm::IRBuilder<> &builder,
   return buff;
 }
 
-bool Compile(const std::vector<const Node *> &ast, std::string_view outfile,
-             DumpType dump, std::filesystem::path source) {
+bool Compile(lang::Module &mod, std::string_view outfile, DumpType dump,
+             std::filesystem::path source) {
   std::ofstream out(outfile.data());
   if (!out) {
     std::cerr << "Could not open file " << outfile << std::endl;
     return false;
   }
-  return Compile(ast, out, dump, outfile, source);
+  return Compile(mod, out, dump, outfile, source);
 }
 
-bool Compile(const std::vector<const Node *> &ast, std::ostream &out,
-             DumpType dump, std::string_view modname,
-             std::filesystem::path source) {
+bool Compile(lang::Module &lang_mod, std::ostream &out, DumpType dump,
+             std::string_view modname, std::filesystem::path source) {
 #if HAS_LSAN
-  // lsab with libLLVM-16 is reporting leaks from within llvm internals.
+  // lsan with libLLVM-16 is reporting leaks from within llvm internals.
   __lsan::ScopedDisabler disable;
 #endif
 
@@ -945,17 +909,10 @@ bool Compile(const std::vector<const Node *> &ast, std::ostream &out,
 
   mod.setDataLayout(TheTargetMachine->createDataLayout());
 
-  std::vector<std::unique_ptr<Node>> gc;
-  Compiler compiler(mod, source);
+  Compiler compiler(lang_mod, mod, source);
 
-  for (const auto *node : ast) {
-    if (const auto *def = llvm::dyn_cast<Define>(node)) {
-      compiler.CompileDefine(*def);
-    } else if (const auto *decl = llvm::dyn_cast<Declare>(node)) {
-      compiler.CompileDeclare(*decl);
-    } else {
-      UNREACHABLE("Unknown top level entity: %u", node->getKind());
-    }
+  for (const Declare *decl : lang_mod.getAST()) {
+    compiler.CompileDeclare(*decl);
   }
 
   compiler.getDIBuilder().finalize();

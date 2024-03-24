@@ -14,14 +14,13 @@
 #define EXPR_LAST(name) EXPR(name)
 #endif
 
-NODE(Define)
-
 EXPR_FIRST(Readc)
 EXPR(Declare)
 EXPR(Composite)
 EXPR(Get)
 EXPR(Set)
 // EXPR(None)
+EXPR(AmbiguousCall)
 EXPR(Call)
 EXPR(Let)
 EXPR(Keep)

@@ -12,6 +12,7 @@ int main(int argc, char **argv) {
   argparser.AddPosArg("file");
   argparser.AddOptArg<bool>("emit-llvm").setStoreTrue();
   argparser.AddOptArg<bool>("dump-ast").setStoreTrue();
+  argparser.AddOptArg<bool>("dump-ast-lower").setStoreTrue();
   argparser.AddOptArg("output", 'o');
 
   auto f = argparser.get("file");
@@ -26,15 +27,27 @@ int main(int argc, char **argv) {
 
   lang::Lexer lexer(input);
   lang::Parser parser(lexer);
-  auto maybe_ast = parser.Parse();
-  if (!maybe_ast) {
-    std::cerr << maybe_ast.getError() << std::endl;
+  auto maybe_mod = parser.Parse();
+  if (!maybe_mod) {
+    std::cerr << maybe_mod.getError() << std::endl;
     return 1;
   }
 
+  lang::Module &mod = **maybe_mod;
   if (*argparser.get<bool>("dump-ast")) {
-    for (const lang::Node *node : *maybe_ast)
-      lang::ASTDumper(*node, std::cout).Dump();
+    lang::ASTDumper dumper(std::cout);
+    for (const lang::Node *node : mod.getAST())
+      dumper.Dump(*node);
+    return 0;
+  }
+
+  lang::ASTBuilder builder;
+  lang::Lower(mod, builder);
+
+  if (*argparser.get<bool>("dump-ast-lower")) {
+    lang::ASTDumper dumper(std::cout);
+    for (const lang::Node *node : mod.getAST())
+      dumper.Dump(*node);
     return 0;
   }
 
@@ -45,12 +58,12 @@ int main(int argc, char **argv) {
   std::string outname;
   if (auto output = argparser.get("output")) {
     if (std::string_view(*output) == "-") {
-      return Compile(*maybe_ast, std::cout, mode, /*modname=*/"", *f) ? 0 : 1;
+      return Compile(mod, std::cout, mode, /*modname=*/"", *f) ? 0 : 1;
     }
 
     outname.append(*output);
   } else {
     outname.append(*f).append(".obj");
   }
-  return Compile(*maybe_ast, outname, mode, *f) ? 0 : 1;
+  return Compile(mod, outname, mode, *f) ? 0 : 1;
 }

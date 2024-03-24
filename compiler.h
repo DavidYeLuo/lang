@@ -37,9 +37,11 @@ enum DumpType {
 
 class Compiler {
  public:
-  Compiler(llvm::Module &mod) : Compiler(mod, "") {}
+  Compiler(lang::Module &lang_mod, llvm::Module &mod)
+      : Compiler(lang_mod, mod, "") {}
 
-  Compiler(llvm::Module &mod, std::filesystem::path source_path)
+  Compiler(lang::Module &lang_mod, llvm::Module &mod,
+           std::filesystem::path source_path)
       : mod_(mod),
         di_builder_(mod),
         di_unit_(
@@ -55,18 +57,10 @@ class Compiler {
 
   llvm::DIBuilder &getDIBuilder() { return di_builder_; }
 
-  void CompileDefine(const Define &define);
   void CompileDeclare(const Declare &declare);
 
-  std::string Mangle(const Type &type) const;
-  std::string Mangle(std::string_view name, const Type &type) const {
-    std::string s(name);
-    s += "_";
-    s += Mangle(type);
-    return s;
-  }
-
   llvm::Value *getExpr(llvm::IRBuilder<> &builder, const Expr &expr);
+  llvm::Value *getDeclare(const Declare &declare);
   // Generate code that checks if the resulting expression value is equal to
   // zero.
   llvm::Value *getBoolExpr(llvm::IRBuilder<> &builder, const Expr &expr);
@@ -171,11 +165,13 @@ class Compiler {
   std::map<const Callable *, std::string_view> named_generic_callables_;
 };
 
-bool Compile(const std::vector<const Node *> &ast, std::string_view outfile,
-             DumpType dump, std::filesystem::path source = "");
-bool Compile(const std::vector<const Node *> &ast, std::ostream &out,
-             DumpType dump, std::string_view modname,
+bool Compile(lang::Module &mod, std::string_view outfile, DumpType dump,
              std::filesystem::path source = "");
+bool Compile(lang::Module &mod, std::ostream &out, DumpType dump,
+             std::string_view modname, std::filesystem::path source = "");
+
+class ASTBuilder;
+void Lower(Module &mod, ASTBuilder &builder);
 
 }  // namespace lang
 

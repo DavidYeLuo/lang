@@ -1,101 +1,51 @@
-decl LLVMModuleCreateWithName = \cptr -> cptr
-decl LLVMInt8Type  = \ -> cptr
-decl LLVMInt32Type = \ -> cptr
-decl LLVMFunctionType = \cptr cptr int int -> cptr
-decl LLVMAddFunction = \cptr cptr cptr -> cptr
-decl LLVMAppendBasicBlock = \cptr cptr -> cptr
-decl LLVMCreateBuilder = \ -> cptr
-decl LLVMPositionBuilderAtEnd = \cptr cptr -> none
-decl LLVMBuildAdd = \cptr cptr cptr cptr -> cptr
-decl LLVMGetParam = \cptr int -> cptr
-decl LLVMBuildRet = \cptr cptr -> cptr
-decl LLVMVerifyModule = \cptr int cptr -> int
-decl LLVMBuildCall2 = \cptr cptr cptr cptr int cptr -> cptr
-decl LLVMSetValueName = \cptr cptr -> none
+cdecl LLVMModuleCreateWithName = \cptr -> cptr
+cdecl LLVMInt8Type  = \ -> cptr
+cdecl LLVMInt32Type = \ -> cptr
+cdecl LLVMFunctionType = \cptr cptr int int -> cptr
+cdecl LLVMAddFunction = \cptr cptr cptr -> cptr
+cdecl LLVMAppendBasicBlock = \cptr cptr -> cptr
+cdecl LLVMCreateBuilder = \ -> cptr
+cdecl LLVMPositionBuilderAtEnd = \cptr cptr -> none
+cdecl LLVMBuildAdd = \cptr cptr cptr cptr -> cptr
+cdecl LLVMGetParam = \cptr int -> cptr
+cdecl LLVMBuildRet = \cptr cptr -> cptr
+cdecl LLVMVerifyModule = \cptr int cptr -> int
+cdecl LLVMBuildCall2 = \cptr cptr cptr cptr int cptr -> cptr
+cdecl LLVMSetValueName = \cptr cptr -> none
 
-decl LLVMInitializeX86TargetInfo = \ -> none
-decl LLVMInitializeX86Target = \ -> none
-decl LLVMInitializeX86TargetMC = \ -> none
-decl LLVMInitializeX86AsmParser = \ -> none
-decl LLVMInitializeX86AsmPrinter = \ -> none
+cdecl LLVMInitializeX86TargetInfo = \ -> none
+cdecl LLVMInitializeX86Target = \ -> none
+cdecl LLVMInitializeX86TargetMC = \ -> none
+cdecl LLVMInitializeX86AsmParser = \ -> none
+cdecl LLVMInitializeX86AsmPrinter = \ -> none
 
-decl LLVMDumpModule = \cptr -> none
-decl LLVMGetNamedFunction = \cptr cptr -> cptr
-decl LLVMPointerType = \cptr int -> cptr
-decl LLVMBuildGlobalStringPtr = \cptr cptr cptr -> cptr
+cdecl LLVMDumpModule = \cptr -> none
+cdecl LLVMGetNamedFunction = \cptr cptr -> cptr
+cdecl LLVMPointerType = \cptr int -> cptr
+cdecl LLVMBuildGlobalStringPtr = \cptr cptr cptr -> cptr
 
-decl LLVMGetDefaultTargetTriple = \ -> cptr
-decl LLVMGetTargetFromTriple = \cptr <cptr> cptr -> none
-decl LLVMGetHostCPUName = \ -> cptr
-decl LLVMGetHostCPUFeatures = \ -> cptr
-decl LLVMCreateTargetMachine = \cptr cptr cptr cptr int int int -> cptr
-decl LLVMTargetMachineEmitToFile = \cptr cptr cptr int cptr -> int
+cdecl LLVMGetDefaultTargetTriple = \ -> cptr
+cdecl LLVMGetTargetFromTriple = \cptr <cptr> cptr -> none
+cdecl LLVMGetHostCPUName = \ -> cptr
+cdecl LLVMGetHostCPUFeatures = \ -> cptr
+cdecl LLVMCreateTargetMachine = \cptr cptr cptr cptr int int int -> cptr
+cdecl LLVMTargetMachineEmitToFile = \cptr cptr cptr int cptr -> int
 
 def writeln = \IO io GENERIC s -> IO
   let io2 = IO call write io s end
   call write io2 "\n" end
 
-def writeln_2arg = \IO io GENERIC s GENERIC s2 -> IO
-  let io2 = IO call write io s end
-  call writeln io2 s2 end
+decl writeln = \IO GENERIC GENERIC_REMAINING -> IO
+def writeln = \IO io GENERIC arg GENERIC_REMAINING remaining -> IO
+  let io2 = IO write(io arg)
+  writeln(io2 remaining)
 
-def writeln_3str = \IO io [256 x char] s [256 x char] s2 [256 x char] s3 -> IO
-  let io2 = IO call write io s end
-  call writeln_2arg io2 s2 s3 end
+def any = \bool a -> bool
+  a
 
-def writeln_4str = \IO io [256 x char] s [256 x char] s2 [256 x char] s3 [256 x char] s4 -> IO
-  let io2 = IO call write io s end
-  call writeln_3str io2 s2 s3 s4 end
-
-def writeln_5str = \IO io [256 x char] s [256 x char] s2 [256 x char] s3 [256 x char] s4
-                    [256 x char] s5 -> IO
-  let io2 = IO call write io s end
-  call writeln_4str io2 s2 s3 s4 s5 end
-
-def writeln_int_5str = \IO io int i2 [256 x char] s2 [256 x char] s3 [256 x char] s4 [256 x char] s5 [256 x char] s6 -> IO
-  call writeln_5str
-    call write io i2 end
-    s2
-    s3
-    s4
-    s5
-    s6
-    end
-
-def writeln_str_int_5str = \IO io [256 x char] s1 int i2 [256 x char] s2 [256 x char] s3 [256 x char] s4 [256 x char] s5 [256 x char] s6 -> IO
-  call writeln_int_5str
-    call write io s1 end
-    i2
-    s2
-    s3
-    s4
-    s5
-    s6
-    end
-
-def writeln_int_str_int_2str = \IO io int i1 [256 x char] s1 int i2 [256 x char] s2 [256 x char] s3 -> IO
-  let io2 = IO call write io i1 end
-  let io3 = IO call write io2 s1 end
-  let io4 = IO call write io3 i2 end
-  call writeln_2arg io4 s2 s3 end
-
-def writeln_int_str_int_5str = \IO io int i1 [256 x char] s1 int i2 [256 x char] s2 [256 x char] s3 [256 x char] s4 [256 x char] s5 [256 x char] s6 -> IO
-  call writeln_str_int_5str
-    call write io i1 end
-    s1
-    i2
-    s2
-    s3
-    s4
-    s5
-    s6
-    end
-
-def any_3 = \bool a bool b bool c -> bool
-  OR a OR b c
-
-def any_4 = \bool a bool b bool c bool d -> bool
-  OR d OR a OR b c
+decl any = \bool GENERIC_REMAINING -> bool
+def any = \bool a GENERIC_REMAINING remaining -> bool
+  OR a any(remaining)
 
 # Arguments:
 # - IO
@@ -129,6 +79,7 @@ def readc_row_col = \IO io int old_row int old_col -> <IO int int int>
 # - IO
 # - The row of the last read character
 # - The col of the last read character
+decl skip_ws = \IO int int -> <IO int int int>
 def skip_ws = \IO io int old_row int old_col -> <IO int int int>
   let res = <IO int int int> call readc_row_col io old_row old_col end
   let io2 = IO GET IO res 0
@@ -155,6 +106,8 @@ def skip_ws = \IO io int old_row int old_col -> <IO int int int>
 # - The last read character
 # - The row of the last read character
 # - The col of the last read character
+decl __read_token_remaining = \IO [128 x char] int int int ->
+                              <[128 x char] IO int int int>
 def __read_token_remaining = \IO io [128 x char] buff int idx int old_row int old_col ->
                               <[128 x char] IO int int int>
   let res = <IO int int int> call readc_row_col io old_row old_col end
@@ -162,7 +115,7 @@ def __read_token_remaining = \IO io [128 x char] buff int idx int old_row int ol
   let c = int GET int res 1
   let row = int GET int res 2
   let col = int GET int res 3
-  if call any_4
+  if call any
        LT c 0
        EQ CAST char c ' '
        EQ CAST char c '\n'
@@ -186,6 +139,8 @@ def __read_token_remaining = \IO io [128 x char] buff int idx int old_row int ol
 # - The last read character
 # - The row of the last read character
 # - The col of the last read character
+decl __read_string_token_impl = \IO [128 x char] int int int ->
+                                <[128 x char] IO int int int>
 def __read_string_token_impl = \IO io [128 x char] buff int idx int old_row int old_col ->
                                 <[128 x char] IO int int int>
   let next = <IO int int int> call readc_row_col io old_row old_col end
@@ -269,6 +224,7 @@ def __read_string_token = \IO io int old_row int old_col -> <[128 x char] IO int
 # - The last read character
 # - The row of the last read character
 # - The col of the last read character
+decl skip_comment_line = \IO int int -> <IO int int int>
 def skip_comment_line = \IO io int old_row int old_col -> <IO int int int>
   # Note the last read character was a '#'.
   let next = <IO int int int> call readc_row_col io old_row old_col end
@@ -297,6 +253,7 @@ def skip_comment_line = \IO io int old_row int old_col -> <IO int int int>
 # - The last char read
 # - The row of the last read character
 # - The col of the last read character
+decl read_token = \IO int int -> <[128 x char] IO int int int>
 def read_token = \IO io int old_row int old_col -> <[128 x char] IO int int int>
   let skipped = <IO int int int> call skip_ws io old_row old_col end
   let skipped_IO = IO GET IO skipped 0
@@ -339,9 +296,9 @@ def read_token = \IO io int old_row int old_col -> <[128 x char] IO int int int>
       row col
       end
 
-  keep _ = IO call writeln_2arg io "TOKEN: " GET [128 x char] res 0 end
-  keep _2 = IO call writeln_2arg io "row: " GET int res 3 end
-  keep _3 = IO call writeln_2arg io "col: " GET int res 4 end
+  keep _ = IO call writeln io "TOKEN: " GET [128 x char] res 0 end
+  keep _2 = IO call writeln io "row: " GET int res 3 end
+  keep _3 = IO call writeln io "col: " GET int res 4 end
 
   <GET [128 x char] res 0
    GET IO res 1
@@ -349,7 +306,7 @@ def read_token = \IO io int old_row int old_col -> <[128 x char] IO int int int>
    GET int res 3
    GET int res 4>
 
-decl strcmp = \[256 x char] [256 x char] -> int
+cdecl strcmp = \[256 x char] [256 x char] -> int
 
 def streq = \[256 x char] s1 [256 x char] s2 -> bool
   let res = int call strcmp s1 s2 end
@@ -380,7 +337,7 @@ def consume = \IO io [256 x char] expected int old_row int old_col -> <IO bool i
   let row = int GET int res 3
   let col = int GET int res 4
   if OR LT c 0 call strne CAST [256 x char] chars expected end
-    <call writeln_int_str_int_5str io
+    <call writeln io
       old_row
       CAST [256 x char] ":"
       old_col
@@ -629,7 +586,7 @@ def compile_call = \IO io cptr func cptr builder cptr mod int old_row int old_co
   if call streq CAST [256 x char] callable_chars CAST [256 x char] "write" end
     call compile_write_call GET IO callable_res 1 func builder mod GET int callable_res 3 GET int callable_res 4 end
   else
-    <call writeln_2arg
+    <call writeln
        GET IO callable_res 1
        "Unable to handle token for callable in call: "
        callable_chars
@@ -665,7 +622,7 @@ def compile_expr = \IO io cptr func cptr builder cptr mod int old_row int old_co
   if call streq CAST [256 x char] expr_chars CAST [256 x char] "call" end
     call compile_call GET IO expr_res 1 func builder mod GET int expr_res 3 GET int expr_res 4 end
   else
-    <call writeln_int_str_int_2str
+    <call writeln
        GET IO expr_res 1
        GET int expr_res 3
        CAST [256 x char] ":"
@@ -723,12 +680,12 @@ def compile_def = \IO io cptr mod int old_row int old_col -> <IO cptr int int>
   # Lower IO types to i32.
   let first_param_type = [256 x char] GET [256 x char] type_res 1
   if call strne CAST [256 x char] "IO" first_param_type end
-    <call writeln_2arg io "Unknown type " first_param_type end CAST cptr 0 0 0>
+    <call writeln io "Unknown type " first_param_type end CAST cptr 0 0 0>
   else
 
   let return_type = [256 x char] GET [256 x char] type_res 3
   if call strne CAST [256 x char] "IO" return_type end
-    <call writeln_2arg io "Unknown type " return_type end CAST cptr 0 0 0>
+    <call writeln io "Unknown type " return_type end CAST cptr 0 0 0>
   else
 
   # Create the function.
@@ -760,7 +717,7 @@ def compile_def = \IO io cptr mod int old_row int old_col -> <IO cptr int int>
 
   <GET IO res 0 mod GET int res 2 GET int res 3>
 
-decl printf = \cptr cptr -> int
+cdecl printf = \cptr cptr -> int
 
 def main = \IO io_ -> IO
   let mod = cptr impurecall LLVMModuleCreateWithName CAST cptr "my_module" end
@@ -773,7 +730,7 @@ def main = \IO io_ -> IO
   else
 
   let verify_failed = int impurecall LLVMVerifyModule compile_def_mod 0 CAST cptr 0 end
-  let verify_failed_io = IO call writeln_2arg
+  let verify_failed_io = IO call writeln
     compile_def_IO
     "verify module failed: "
     verify_failed
@@ -817,7 +774,7 @@ def main = \IO io_ -> IO
   keep failed_to_write =
     int call LLVMTargetMachineEmitToFile target_machine mod CAST cptr "add.obj" 1 CAST cptr 0 end
   keep failed_to_write_io =
-    IO call writeln_2arg io___13 "failed to write add.obj: " failed_to_write end
+    IO call writeln io___13 "failed to write add.obj: " failed_to_write end
 
   let err_buff = [1024 x char] zero
   let err_buff_ptr = <cptr> <CAST cptr err_buff>
@@ -829,4 +786,4 @@ def main = \IO io_ -> IO
     1
     CAST cptr err_buff_ptr
     end
-  call writeln_2arg failed_to_write_io "failed to write obj.obj: " failed_to_write_obj end
+  call writeln failed_to_write_io "failed to write obj.obj: " failed_to_write_obj end

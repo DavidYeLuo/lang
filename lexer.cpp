@@ -169,6 +169,8 @@ Result<Token> Lexer::LexImpl() {
     return Result<Token>(Token::TK_Def, start, end, buff);
   if (buff == "decl")
     return Result<Token>(Token::TK_Decl, start, end, buff);
+  if (buff == "cdecl")
+    return Result<Token>(Token::TK_CDecl, start, end, buff);
   if (buff == "call")
     return Result<Token>(Token::TK_Call, start, end, buff);
   if (buff == "impurecall")
@@ -214,6 +216,8 @@ Result<Token> Lexer::LexImpl() {
     return Result<Token>(Token::TK_SET, start, end, buff);
   if (buff == "GENERIC")
     return Result<Token>(Token::TK_GENERIC, start, end, buff);
+  if (buff == "GENERIC_REMAINING")
+    return Result<Token>(Token::TK_GENERIC_REMAINING, start, end, buff);
 
   if (std::all_of(buff.begin(), buff.end(), isdigit))
     return Result<Token>(Token::TK_Int, start, end, buff);

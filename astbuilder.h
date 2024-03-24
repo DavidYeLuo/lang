@@ -15,36 +15,35 @@ namespace lang {
 // management.
 class ASTBuilder {
  public:
-  const Str &getStr(const SourceLocation &start, std::string_view str) {
+  Str &getStr(const SourceLocation &start, std::string_view str) {
     return llvm::cast<Str>(
         *nodes_.emplace_back(new Str(start, str, getCharArrayType(str))));
   }
 
-  const Char &getChar(const SourceLocation &start, char c) {
+  Char &getChar(const SourceLocation &start, char c) {
     return llvm::cast<Char>(
         *nodes_.emplace_back(new Char(start, c, getCharType())));
   }
 
-  const Int &getInt(const SourceLocation &start, int i) {
+  Int &getInt(const SourceLocation &start, int i) {
     return llvm::cast<Int>(
         *nodes_.emplace_back(new Int(start, i, getIntType())));
   }
 
-  const Bool &getBool(const SourceLocation &start, bool b) {
+  Bool &getBool(const SourceLocation &start, bool b) {
     return llvm::cast<Bool>(
         *nodes_.emplace_back(new Bool(start, b, getBoolType())));
   }
 
-  const BinOp &getBinOp(const Expr &lhs, const Expr &rhs, const Type &type,
-                        BinOp::OpKind op) {
-    assert(Equals(lhs.getType(), rhs.getType()) &&
+  BinOp &getBinOp(Expr &lhs, Expr &rhs, const Type &type, BinOp::OpKind op) {
+    assert(lhs.getType() == rhs.getType() &&
            "Operand types for bin op must be equal");
     return llvm::cast<BinOp>(
         *nodes_.emplace_back(new BinOp(lhs.getStart(), lhs, rhs, type, op)));
   }
 
-  const BinOp &getBinOp(const Expr &lhs, const Expr &rhs, BinOp::OpKind op) {
-    assert(Equals(lhs.getType(), rhs.getType()) &&
+  BinOp &getBinOp(Expr &lhs, Expr &rhs, BinOp::OpKind op) {
+    assert(lhs.getType() == rhs.getType() &&
            "Operand types for bin op must be equal");
     const Type *type;
     switch (op) {
@@ -62,80 +61,62 @@ class ASTBuilder {
         *nodes_.emplace_back(new BinOp(lhs.getStart(), lhs, rhs, *type, op)));
   }
 
-  const If &getIf(const SourceLocation &start, const Type &type,
-                  const Expr &cond, const Expr &if_body,
-                  const Expr &else_body) {
+  If &getIf(const SourceLocation &start, const Type &type, Expr &cond,
+            Expr &if_body, Expr &else_body) {
     return llvm::cast<If>(
         *nodes_.emplace_back(new If(start, type, cond, if_body, else_body)));
   }
 
-  const If &getIf(const SourceLocation &start, const Expr &cond,
-                  const Expr &if_body, const Expr &else_body) {
+  If &getIf(const SourceLocation &start, Expr &cond, Expr &if_body,
+            Expr &else_body) {
     // TODO: Check body types.
     return llvm::cast<If>(*nodes_.emplace_back(
         new If(start, if_body.getType(), cond, if_body, else_body)));
   }
 
-  const Zero &getZero(const SourceLocation &start, const Type &type) {
+  Zero &getZero(const SourceLocation &start, const Type &type) {
     return llvm::cast<Zero>(*nodes_.emplace_back(new Zero(start, type)));
   }
 
-  const Readc &getReadc(const SourceLocation &start) {
+  Readc &getReadc(const SourceLocation &start) {
     const CallableType &ty = getCallableType(
         getCompositeType({&getIOType(), &getIntType()}), {&getIOType()});
     return llvm::cast<Readc>(*nodes_.emplace_back(new Readc(start, ty)));
   }
 
-  const Cast &getCast(const SourceLocation &start, const Type &type,
-                      const Expr &expr) {
+  Cast &getCast(const SourceLocation &start, const Type &type, Expr &expr) {
     return llvm::cast<Cast>(*nodes_.emplace_back(new Cast(start, type, expr)));
   }
 
-  const Let &getLet(const SourceLocation &start, std::string_view name,
-                    const Expr &expr) {
+  Let &getLet(const SourceLocation &start, std::string_view name, Expr &expr) {
     return llvm::cast<Let>(*nodes_.emplace_back(new Let(start, name, expr)));
   }
 
-  const Keep &getKeep(const SourceLocation &start, std::string_view name,
-                      const Expr &expr, const Expr &body) {
+  Keep &getKeep(const SourceLocation &start, std::string_view name, Expr &expr,
+                Expr &body) {
     return llvm::cast<Keep>(
         *nodes_.emplace_back(new Keep(start, name, expr, body)));
   }
 
-  // Create a `Callable` where the return type is explicitly given. The body is
-  // generated from the callback which receives two arguments:
-  //
-  //   1. A reference to the `Callable` where the body will be assigned to.
-  //   2. The list of argument expressions passed to the callable.
-  //
-  using BodyCallbackTy = std::function<const Expr &(
-      const CallableBase &, const std::vector<const Arg *> &)>;
-  const Callable &getCallable(const SourceLocation &start, const Type &ret_type,
-                              const std::vector<SourceLocation> &arg_starts,
-                              const std::vector<std::string> &arg_names,
-                              const std::vector<const Type *> &arg_types,
-                              const BodyCallbackTy &callback) {
-    // TODO: We need the actual args to be non-const so we can eventually set
-    // the parent callable pointer after its creation. Ideally we'd just have
-    // one vector of const arg pointers.
+  Callable &getCallable(const SourceLocation &start, const Type &ret_type,
+                        const std::vector<SourceLocation> &arg_starts,
+                        const std::vector<std::string> &arg_names,
+                        const std::vector<const Type *> &arg_types) {
+    assert(arg_types.size() == arg_names.size());
+    assert(arg_types.size() == arg_starts.size());
     std::vector<Arg *> args;
-    std::vector<const Arg *> const_args;
     for (size_t i = 0; i < arg_types.size(); ++i) {
       Arg *ptr = new Arg(arg_starts.at(i), *arg_types.at(i), i);
       nodes_.emplace_back(ptr);
       args.push_back(ptr);
-      const_args.push_back(ptr);
     }
 
     const CallableType &callable_ty = getCallableType(ret_type, arg_types);
-    Callable *callable =
-        new Callable(start, callable_ty, arg_names, const_args);
+    Callable *callable = new Callable(start, callable_ty, arg_names, args);
     nodes_.emplace_back(callable);
     for (Arg *arg : args) {
       arg->setParent(*callable);
     }
-    const Expr &body = callback(*callable, const_args);
-    callable->setBody(body);
     return *callable;
   }
 
@@ -143,22 +124,36 @@ class ASTBuilder {
   //   return llvm::cast<None>(*nodes_.emplace_back(new None(getNoneType())));
   // }
 
-  const Call &getCall(const SourceLocation &start, const Expr &func,
-                      const std::vector<const Expr *> &args, bool pure = true) {
+  Call &getCall(const SourceLocation &start, Expr &func,
+                const std::vector<Expr *> &args, bool pure = true) {
     const auto &callable_ty = llvm::cast<CallableType>(func.getType());
     const auto &ret_ty = callable_ty.getReturnType();
-    assert(callable_ty.getNumArgs() == args.size() &&
-           "Mismatch number of arguments and types");
-    for (size_t i = 0; i < args.size(); ++i) {
+    assert(callable_ty.ArgumentTypesMatch(args));
+    for (size_t i = 0; i < callable_ty.getNumArgs(); ++i) {
       assert(callable_ty.getArgType(i).isGeneric() ||
-             Equals(callable_ty.getArgType(i), args.at(i)->getType()));
+             callable_ty.getArgType(i) == args.at(i)->getType());
     }
     return llvm::cast<Call>(
         *nodes_.emplace_back(new Call(start, ret_ty, func, args, pure)));
   }
 
-  const Composite &getComposite(const SourceLocation &start,
-                                const std::vector<const Expr *> &elems) {
+  AmbiguousCall &getAmbiguousCall(const SourceLocation &start,
+                                  const std::vector<Expr *> &funcs,
+                                  const std::vector<Expr *> &args) {
+    assert(AmbiguousCall::CanMake(funcs));
+    assert(std::all_of(funcs.begin(), funcs.end(), [&](const Expr *e) {
+      return llvm::cast<CallableType>(e->getType()).ArgumentTypesMatch(args);
+    }));
+    assert(std::all_of(funcs.begin(), funcs.end(), [&funcs](const Expr *e) {
+      return e->getType().getReturnType() ==
+             funcs.front()->getType().getReturnType();
+    }));
+    return llvm::cast<AmbiguousCall>(*nodes_.emplace_back(new AmbiguousCall(
+        start, funcs.front()->getType().getReturnType(), funcs, args)));
+  }
+
+  Composite &getComposite(const SourceLocation &start,
+                          const std::vector<Expr *> &elems) {
     std::vector<const Type *> types;
     for (const Expr *elem : elems) {
       types.push_back(&elem->getType());
@@ -167,8 +162,7 @@ class ASTBuilder {
         new Composite(start, getCompositeType(types), elems)));
   }
 
-  const Set &getSet(const SourceLocation &start, const Expr &expr,
-                    const Expr &idx, const Expr &store) {
+  Set &getSet(const SourceLocation &start, Expr &expr, Expr &idx, Expr &store) {
     assert(llvm::isa<CompositeType>(expr.getType()) ||
            llvm::isa<ArrayType>(expr.getType()));
     assert(idx.getType().isNamedType("int"));
@@ -176,8 +170,8 @@ class ASTBuilder {
         *nodes_.emplace_back(new Set(start, expr, idx, store)));
   }
 
-  const Get &getGet(const SourceLocation &start, const Type &type,
-                    const Expr &expr, const Expr &idx) {
+  Get &getGet(const SourceLocation &start, const Type &type, Expr &expr,
+              Expr &idx) {
     assert(llvm::isa<CompositeType>(expr.getType()) ||
            llvm::isa<ArrayType>(expr.getType()));
     assert(idx.getType().isNamedType("int"));
@@ -185,16 +179,18 @@ class ASTBuilder {
         *nodes_.emplace_back(new Get(start, type, expr, idx)));
   }
 
-  const Define &getDefine(const SourceLocation &start, std::string_view name,
-                          const Expr &body) {
-    return llvm::cast<Define>(
-        *nodes_.emplace_back(new Define(start, name, body)));
+  Declare &getDeclare(const SourceLocation &start, std::string_view name,
+                      Expr &expr, bool is_write, bool is_cdecl) {
+    Declare *decl = new Declare(start, name, expr, is_write, is_cdecl);
+    nodes_.emplace_back(decl);
+    return *decl;
   }
 
-  const Declare &getDeclare(const SourceLocation &start, std::string_view name,
-                            const Type &type) {
-    return llvm::cast<Declare>(
-        *nodes_.emplace_back(new Declare(start, name, type)));
+  Declare &getDeclare(const SourceLocation &start, std::string_view name,
+                      const Type &type, bool is_write, bool is_cdecl) {
+    Declare *decl = new Declare(start, name, type, is_write, is_cdecl);
+    nodes_.emplace_back(decl);
+    return *decl;
   }
 
   const NamedType &getNamedType(std::string_view name);
@@ -230,24 +226,16 @@ class ASTBuilder {
   }
 
   const GenericType &getGenericType() { return generic_; }
-
-  bool Equals(const Type &lhs, const Type &rhs) const;
-#define TYPE(name) bool Equals(const name &lhs, const Type &rhs) const;
-#include "types.def"
-
-  // Similar to Equals(const Callable &, ...) but it also takes into account
-  // generic argument types.
-  bool CallableTypesMatch(const CallableType &lhs,
-                          const CallableType &rhs) const;
-
-  bool ArgumentTypesMatch(const std::vector<const Type *> &args1,
-                          const std::vector<const Type *> &args2) const;
+  const GenericRemainingType &getGenericRemainingType() {
+    return generic_remaining_;
+  }
 
  private:
-  std::vector<std::unique_ptr<const Node>> nodes_;
+  std::vector<std::unique_ptr<Node>> nodes_;
   std::vector<std::unique_ptr<const Type>> types_;
   std::map<std::string, const NamedType *, std::less<>> named_types_;
   GenericType generic_;
+  GenericRemainingType generic_remaining_;
 };
 
 }  // namespace lang

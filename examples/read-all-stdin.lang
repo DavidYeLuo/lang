@@ -1,3 +1,4 @@
+decl echo = \IO -> IO
 def echo = \IO io -> IO
   let x = <IO int> call readc io end
   let io2 = IO GET IO x 0

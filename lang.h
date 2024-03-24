@@ -43,8 +43,8 @@ class SourceLocation {
   std::istream::pos_type pos_;
 };
 
-static inline std::stringstream &operator<<(std::stringstream &ss,
-                                            const SourceLocation &loc) {
+static inline std::ostream &operator<<(std::ostream &ss,
+                                       const SourceLocation &loc) {
   ss << loc.getRow() << ":" << loc.getCol();
   return ss;
 }
@@ -84,6 +84,10 @@ class Diagnostic {
   std::string get() {
     // Save the position.
     const auto old_pos = input_.tellg();
+    if (old_pos == -1) {
+      // FIXME: We shouldn't run into this.
+      return ss_.str();
+    }
     constexpr size_t kMaxRewind = 80;  // To prevent scanning long lines,
                                        // we'll only scan backwords (and
                                        // forwards up to this many charaters).
@@ -119,7 +123,8 @@ class Diagnostic {
     ss_ << '\n';
 
     // Print the ^
-    for (size_t i = 0; i < num_rewinded_chars; ++i) ss_ << ' ';
+    for (size_t i = 0; i < num_rewinded_chars; ++i)
+      ss_ << ' ';
     ss_ << '^';
 
     // Reset the position.
