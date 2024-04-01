@@ -201,6 +201,24 @@ class Result {
   std::string err_;
 };
 
+template <typename Arg>
+void Join(std::stringstream &ss, const Arg &arg) {
+  ss << arg;
+}
+
+template <typename Arg, typename... Args>
+void Join(std::stringstream &ss, const Arg &arg, const Args &...args) {
+  ss << arg;
+  Join(ss, args...);
+}
+
+template <typename... Args>
+std::string Join(const Args &...args) {
+  std::stringstream ss;
+  Join(ss, args...);
+  return ss.str();
+}
+
 }  // namespace lang
 
 #endif  // LANG_H_

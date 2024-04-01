@@ -1,6 +1,5 @@
 #include "astcloner.h"
 
-#include <format>
 #include <iostream>
 #include <utility>
 
@@ -77,7 +76,9 @@ Node &ASTCloner::Visit(const Callable &callable) {
 
   std::vector<std::string> argnames(callable.getArgNames());
   for (size_t i = argnames.size(); i < arg_types.size(); ++i) {
-    argnames.push_back(std::format("arg{}", i));
+    std::stringstream ss;
+    ss << "arg" << i;
+    argnames.push_back(ss.str());
   }
 
   Callable &newcallable = builder_.getCallable(

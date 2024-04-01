@@ -1,8 +1,11 @@
 cmake_minimum_required(VERSION 3.25)
 project(lang)
 
-set(LLVM_CONFIG llvm-config)
-set(CLANG_FORMAT clang-format)
+set(LLVM_CONFIG llvm-config CACHE STRING "llvm-config to use")
+set(CLANG_FORMAT clang-format CACHE STRING "clang-format to use")
+
+message(STATUS "LLVM_CONFIG: ${LLVM_CONFIG}")
+message(STATUS "CLANG_FORMAT: ${CLANG_FORMAT}")
 
 set(CXXFLAGS
     -Wall -Werror -std=c++20 -fno-rtti -fno-exceptions -g
@@ -112,7 +115,10 @@ target_link_libraries(test
   ${LLVM_CONFIG_LD_FLAGS}
   ${LLVM_CONFIG_SYSTEM_LIBS}
   ${LLVM_CONFIG_CORE_LIBS})
-target_compile_definitions(test PUBLIC EXAMPLES_DIR="${CMAKE_SOURCE_DIR}/examples/")
+target_compile_definitions(test PUBLIC
+  EXAMPLES_DIR="${CMAKE_SOURCE_DIR}/examples/"
+  COMPILER_PATH="${CMAKE_C_COMPILER}"
+  LLVM_CONFIG="${LLVM_CONFIG}")
 add_dependencies(test lang)
 
 # FORMATTING

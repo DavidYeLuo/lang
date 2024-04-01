@@ -1,7 +1,6 @@
 #ifndef LEXER_H_
 #define LEXER_H_
 
-#include <format>
 #include <istream>
 #include <string>
 #include <string_view>
@@ -84,9 +83,10 @@ class Token {
   }
 
   std::string toString() const {
-    return std::format("<kind={} start={},{} end={},{} chars='{}'>", (int)kind_,
-                       start_.getRow(), start_.getCol(), end_.getRow(),
-                       end_.getCol(), chars_);
+    std::stringstream ss;
+    ss << "<kind=" << static_cast<int>(kind_) << " start=" << start_
+       << " end=" << end_ << " chars='" << chars_ << "'>";
+    return ss.str();
   }
 
  private:

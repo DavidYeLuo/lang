@@ -100,8 +100,8 @@ Result<Token> Lexer::LexImpl() {
     case '-': {
       char next = getNextChar();
       if (next != '>')
-        return Diagnostic(input_, start)
-               << "Expected `->`; " << " instead found `-" << next << "`";
+        return Diagnostic(input_, start) << "Expected `->`; "
+                                         << " instead found `-" << next << "`";
       return Result<Token>(Token::TK_Arrow, start,
                            SourceLocation(row_, col_ + 1, next_pos), "->");
     }
