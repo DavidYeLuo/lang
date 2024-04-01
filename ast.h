@@ -181,8 +181,14 @@ class CallableType : public Type {
   // Similar to CallableType::Equals(const Type &) but it also takes into
   // account generic argument types.
   bool CallableTypesMatch(const CallableType &rhs) const;
-  bool ArgumentTypesMatch(const std::vector<const Type *> &args) const;
-  bool ArgumentTypesMatch(const std::vector<Expr *> &args) const;
+  bool ArgumentTypesMatch(std::span<const Type *const> args) const;
+  bool ArgumentTypesMatch(const std::vector<const Type *> &args) const {
+    return ArgumentTypesMatch(std::span{args.begin(), args.size()});
+  }
+  bool ArgumentTypesMatch(std::span<Expr *const> args) const;
+  bool ArgumentTypesMatch(const std::vector<Expr *> &args) const {
+    return ArgumentTypesMatch(std::span{args.begin(), args.size()});
+  }
 
  protected:
   bool Equals(const Type &other) const override;
@@ -192,8 +198,8 @@ class CallableType : public Type {
   const std::vector<const Type *> arg_types_;
 };
 
-bool ArgumentTypesMatch(const std::vector<const Type *> &args1,
-                        const std::vector<const Type *> &args2);
+bool ArgumentTypesMatch(std::span<const Type *const> args1,
+                        std::span<const Type *const> args2);
 
 class ArrayType : public Type {
  public:

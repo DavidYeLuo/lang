@@ -60,20 +60,19 @@ bool CallableType::Equals(const Type &rhs) const {
   return false;
 }
 
-bool CallableType::ArgumentTypesMatch(
-    const std::vector<const Type *> &args) const {
+bool CallableType::ArgumentTypesMatch(std::span<const Type *const> args) const {
   return lang::ArgumentTypesMatch(arg_types_, args);
 }
 
-bool CallableType::ArgumentTypesMatch(const std::vector<Expr *> &args) const {
+bool CallableType::ArgumentTypesMatch(std::span<Expr *const> args) const {
   std::vector<const Type *> arg_types(args.size());
   std::transform(args.begin(), args.end(), arg_types.begin(),
                  [](const Expr *e) { return &e->getType(); });
   return ArgumentTypesMatch(arg_types);
 }
 
-bool ArgumentTypesMatch(const std::vector<const Type *> &args1,
-                        const std::vector<const Type *> &args2) {
+bool ArgumentTypesMatch(std::span<const Type *const> args1,
+                        std::span<const Type *const> args2) {
   // Let's take this example:
   //
   //   def writeln = \IO io GENERIC arg -> IO
@@ -104,31 +103,25 @@ bool ArgumentTypesMatch(const std::vector<const Type *> &args1,
     if (args2.size() < args1.size())
       return false;
     // Check all arguments up to the generic one.
-    // TODO: Use a span here.
     auto dist = args1.end() - 1 - args1.begin();
-    return ArgumentTypesMatch(
-        std::vector<const Type *>(args1.begin(), args1.begin() + dist),
-        std::vector<const Type *>(args2.begin(), args2.begin() + dist));
+    return ArgumentTypesMatch(args1.subspan(0, dist), args2.subspan(0, dist));
   }
   if (!args2.empty() && llvm::isa<GenericRemainingType>(args2.back())) {
     if (args1.size() < args2.size())
       return false;
     // Check all arguments up to the generic one.
-    // TODO: Use a span here.
     auto dist = args2.end() - 1 - args2.begin();
-    return ArgumentTypesMatch(
-        std::vector<const Type *>(args1.begin(), args1.begin() + dist),
-        std::vector<const Type *>(args2.begin(), args2.begin() + dist));
+    return ArgumentTypesMatch(args1.subspan(0, dist), args2.subspan(0, dist));
   }
 
   if (args1.size() != args2.size())
     return false;
 
   for (size_t i = 0; i < args1.size(); ++i) {
-    if (args1.at(i)->isGeneric() || args2.at(i)->isGeneric())
+    if (args1[i]->isGeneric() || args2[i]->isGeneric())
       continue;
 
-    if (*args1.at(i) != *args2.at(i))
+    if (*args1[i] != *args2[i])
       return false;
   }
 
