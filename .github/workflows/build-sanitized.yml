@@ -1,0 +1,41 @@
+name: Build + Test (Sanitized)
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+  merge_group:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v3
+    - name: apt-get dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get -y install unzip wget cmake lsb-release software-properties-common gnupg ninja-build
+        wget https://apt.llvm.org/llvm.sh
+        chmod +x llvm.sh
+        sudo ./llvm.sh 16
+        sudo apt-get -y install clang-format-16
+    - name: CMake
+      run: |
+        mkdir build
+        cd build
+        cmake .. -GNinja -DCMAKE_C_COMPILER=clang-16 -DCMAKE_CXX_COMPILER=clang++-16 -DLLVM_CONFIG=llvm-config-16 -DCLANG_FORMAT=clang-format-16
+    - name: Ninja
+      run: |
+        cd build
+        ninja -j4
+    - name: Run test executable
+      run: |
+        cd build
+        ./test
+    - name: Check formatting
+      run: |
+        cd build
+        ninja format-check

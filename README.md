@@ -1,5 +1,7 @@
 # Language
 
+![Build Status Sanitized](https://github.com/PiJoules/lang/actions/workflows/build-sanitized.yml/badge.svg)
+
 Hopefully I don't abandon this one also. This is the furthest I've gotten with
 any personal project.
 
@@ -38,4 +40,13 @@ This was only tested on x86_64-linux.
 
 ```sh
 $ ./test  # Inside the build dir.
+```
+
+### Reproducing the github actions builders
+
+The github actions can also be tested locally via  docker containers using
+[act](https://github.com/nektos/act).
+
+```
+$ act --workflows .github/workflows/build.yml
 ```

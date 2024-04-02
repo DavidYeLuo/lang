@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.25)
+cmake_minimum_required(VERSION 3.22)
 project(lang)
 
 set(LLVM_CONFIG llvm-config CACHE STRING "llvm-config to use")
