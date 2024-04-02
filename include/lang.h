@@ -43,17 +43,17 @@ class SourceLocation {
   std::istream::pos_type pos_;
 };
 
-static inline std::ostream &operator<<(std::ostream &ss,
-                                       const SourceLocation &loc) {
-  ss << loc.getRow() << ":" << loc.getCol();
-  return ss;
+inline std::ostream &operator<<(std::ostream &out, const SourceLocation &loc) {
+  out << loc.getRow() << ":" << loc.getCol();
+  return out;
 }
 
+//
 // Usage:
 //
-//   return Result<...>::Diagnostic(input, loc) << "Expression type mismatch;
-//   found `"
-//   << chars << "`";
+//   return Result<...>::Diagnostic(input)
+//     << loc << ": Expression type mismatch; found `"
+//     << chars << "`" << DumpLine{loc};
 //
 // which results in an error looking something like:
 //
@@ -65,13 +65,17 @@ static inline std::ostream &operator<<(std::ostream &ss,
 // followed by ": ", then a diagnostic message, then the line in the original
 // source and an arrow pointing to the location.
 //
+
+void GetSrcLineAndArrow(const std::istream::pos_type pos, std::istream &input,
+                        std::ostream &out);
+
+struct DumpLine {
+  const SourceLocation &loc;
+};
+
 class Diagnostic {
  public:
-  Diagnostic(std::istream &input, const SourceLocation &loc)
-      : input_(input), pos_(loc.getPositionIndicator()) {
-    assert(loc.isValid());
-    ss_ << loc << ": ";
-  }
+  Diagnostic(std::istream &input) : input_(input) {}
 
   Diagnostic(Diagnostic &&other) = default;
 
@@ -81,62 +85,17 @@ class Diagnostic {
     return *this;
   }
 
-  std::string get() {
-    // Save the position.
-    const auto old_pos = input_.tellg();
-    if (old_pos == -1) {
-      // FIXME: We shouldn't run into this.
-      return ss_.str();
-    }
-    constexpr size_t kMaxRewind = 80;  // To prevent scanning long lines,
-                                       // we'll only scan backwords (and
-                                       // forwards up to this many charaters).
-
-    input_.seekg(pos_);
-
-    // Rewind until we hit the start of the line.
-    size_t num_rewinded_chars = 0;
-    input_.seekg(-1, std::ios_base::cur);  // Move back one so we can peek
-                                           // starting from current pos.
-    for (; num_rewinded_chars < kMaxRewind; ++num_rewinded_chars) {
-      int ch = input_.peek();
-      assert(ch != EOF);
-      if (ch == '\n' || input_.tellg() == 0)
-        break;
-      input_.seekg(-1, std::ios_base::cur);
-    }
-
-    if (input_.peek() == '\n') {
-      input_.seekg(1, std::ios_base::cur);
-      assert(num_rewinded_chars);
-      num_rewinded_chars--;
-    }
-
-    // Retrieve the line.
-    ss_ << '\n';
-    for (size_t i = 0; i < kMaxRewind * 2; ++i) {
-      int ch = input_.get();
-      if (ch == '\n' || ch == EOF)
-        break;
-      ss_ << static_cast<char>(ch);
-    }
-    ss_ << '\n';
-
-    // Print the ^
-    for (size_t i = 0; i < num_rewinded_chars; ++i)
-      ss_ << ' ';
-    ss_ << '^';
-
-    // Reset the position.
-    input_.seekg(old_pos);
-
-    return ss_.str();
+  template <>
+  Diagnostic &operator<<(const DumpLine &other) {
+    GetSrcLineAndArrow(other.loc.getPositionIndicator(), input_, ss_);
+    return *this;
   }
+
+  std::string get() { return ss_.str(); }
 
  private:
   std::istream &input_;
   std::stringstream ss_;
-  const std::istream::pos_type pos_;
 };
 
 // A result is similar to an `std::optional` but it instead carries an error

@@ -1,4 +1,6 @@
-add_library(lang_interface INTERFACE EXCLUDE_FROM_ALL ../include/lang.h)
+add_library(lang_interface EXCLUDE_FROM_ALL
+  ../include/lang.h
+  diagnostics.cpp)
 add_library(argparse INTERFACE EXCLUDE_FROM_ALL ../include/argparse.h)
 add_library(nodes INTERFACE EXCLUDE_FROM_ALL ../include/nodes.def)
 add_library(types INTERFACE EXCLUDE_FROM_ALL ../include/types.def)

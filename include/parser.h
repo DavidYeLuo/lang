@@ -7,7 +7,6 @@
 
 #include "ast.h"
 #include "astbuilder.h"
-#include "astdumper.h"
 #include "lang.h"
 #include "lexer.h"
 
@@ -84,31 +83,33 @@ class Parser {
     assert(res && res->isa(kind));
   }
 
-  // Simple helper for creating an error result. Since this is an error, we
-  // don't really need to provide a type, so let's just use nullptr_t.
-  Diagnostic getDiag(const SourceLocation &loc) const {
-    return Diagnostic(lexer_.getInput(), loc);
-  }
+  Diagnostic getErrorDiag() const { return Diagnostic(lexer_.getInput()); }
 
   Diagnostic getExpectedCallableDiag(const SourceLocation &loc,
                                      const Type &found) const {
-    return std::move(getDiag(loc) << "Expected a callable type; instead found `"
-                                  << found.toString() << "`");
+    Diagnostic diag(getErrorDiag());
+    diag << loc << ": Expected a callable type; instead found `"
+         << found.toString() << "`";
+    return diag;
   }
 
-  template <typename T>
-  Result<T> getAmbiguousCallDiag(
+  Diagnostic getAmbiguousCallDiag(
       const SourceLocation &loc, std::string_view name,
-      const std::vector<Expr *> &possible_callables) const {
-    // TODO: We dont't want to dump the ast. We want to print the relevant
-    // lines in the source.
-    auto diag = getDiag(loc);
-    diag << "Ambiguous call to `" << name << "` with arg types `";
-    std::stringstream ss;
-    ss << diag.get() << "\n";
-    for (const Expr *expr : possible_callables)
-      ASTDumper(ss).Dump(*expr);
-    return Result<T>::Error(ss.str());
+      const std::vector<Expr *> &possible_callables,
+      const std::vector<const Type *> *maybe_argtypes) const {
+    Diagnostic diag(getErrorDiag());
+    diag << loc << ": Ambiguous call to `" << name << "`";
+    if (maybe_argtypes) {
+      diag << " with arg types `";
+      for (const Type *type : *maybe_argtypes) {
+        diag << type->toString() << " ";
+      }
+      diag << "`";
+    }
+    for (const Expr *expr : possible_callables) {
+      diag << DumpLine{expr->getStart()} << "\n";
+    }
+    return diag;
   }
 
   void Warn(const SourceLocation &loc) const;
