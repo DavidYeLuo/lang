@@ -100,8 +100,9 @@ Result<Token> Lexer::LexImpl() {
     case '-': {
       char next = getNextChar();
       if (next != '>')
-        return Diagnostic(input_, start) << "Expected `->`; "
-                                         << " instead found `-" << next << "`";
+        return Diagnostic(input_)
+               << start << ": Expected `->`; "
+               << " instead found `-" << next << "`" << DumpLine{start};
       return Result<Token>(Token::TK_Arrow, start,
                            SourceLocation(row_, col_ + 1, next_pos), "->");
     }
@@ -141,9 +142,9 @@ Result<Token> Lexer::LexImpl() {
       buff += ch;
       ch = getNextChar();
       if (ch != '\'')
-        return Diagnostic(input_, start)
-               << "Expected char literal to end with closing `'`; "
-               << " instead found `" << ch << "`";
+        return Diagnostic(input_)
+               << start << ": Expected char literal to end with closing `'`; "
+               << " instead found `" << ch << "`" << DumpLine{start};
       buff += ch;
       SourceLocation end;
       PeekNextChar(end);
@@ -227,7 +228,8 @@ Result<Token> Lexer::LexImpl() {
                   [](char c) { return isalnum(c) || c == '_'; }))
     return Result<Token>(Token::TK_Identifier, start, end, buff);
 
-  return Diagnostic(input_, start) << "Unable to lex `" << buff << "`";
+  return Diagnostic(input_)
+         << start << ": Unable to lex `" << buff << "`" << DumpLine{start};
 }
 
 }  // namespace lang

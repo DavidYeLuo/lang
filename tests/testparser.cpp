@@ -60,10 +60,12 @@ TEST(Errors, MultipleCallableOverrides) {
   std::ifstream input(EXAMPLES_DIR "/multiple-callable-overrides.lang");
   constexpr std::string_view kExpectedError =
       "9:15: Callable `writeln` with type `\\IO int GENERIC -> IO` is handled "
-      "by "
-      "another callable\n"
+      "by another callable\n"
       "def writeln = \\IO io int arg1 GENERIC arg2 -> IO\n"
-      "              ^\n";
+      "              ^\n"
+      "5:1: note: Declared here\n"
+      "def writeln = \\IO io GENERIC arg1 GENERIC arg2 -> IO\n"
+      "^";
   lang::Lexer lexer(input);
   lang::Parser parser(lexer);
   auto res = parser.Parse();
