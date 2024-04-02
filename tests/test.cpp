@@ -117,7 +117,7 @@ class LangCompilerE2E : public testing::Test {
     // use the second stage to create this, so let's delete it first.
     std::filesystem::remove("obj.obj");
 
-    ASSERT_EQ(RunCommand("./lang " EXAMPLES_DIR "/compiler.lang"), 0);
+    ASSERT_EQ(RunCommand(LANG_EXE " " EXAMPLES_DIR "/compiler.lang"), 0);
     ASSERT_EQ(RunCommand(lang::Join(COMPILER_PATH
                                     " " EXAMPLES_DIR
                                     "/compiler.lang.obj $(" LLVM_CONFIG " "
