@@ -39,7 +39,7 @@ $ ninja
 This was only tested on x86_64-linux.
 
 ```sh
-$ ./test  # Inside the build dir.
+$ ./bin/lang-tests  # Inside the build dir.
 ```
 
 ### Reproducing the github actions builders
@@ -48,5 +48,5 @@ The github actions can also be tested locally via  docker containers using
 [act](https://github.com/nektos/act).
 
 ```
-$ act --workflows .github/workflows/build.yml
+$ act --workflows .github/workflows/build-sanitized.yml
 ```

@@ -34,7 +34,7 @@ jobs:
     - name: Run test executable
       run: |
         cd build
-        ./test
+        ./bin/lang-tests
     - name: Check formatting
       run: |
         cd build
