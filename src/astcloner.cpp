@@ -8,13 +8,20 @@
 namespace lang {
 
 Node &ASTCloner::Visit(const Declare &decl) {
-  if (decl.isDefinition())
-    return builder_.getDeclare(decl.getStart(), decl.getName(),
-                               VisitExpr(decl.getBody()), decl.isBuiltinWrite(),
-                               decl.isCDecl());
-  else
-    return builder_.getDeclare(decl.getStart(), decl.getName(), decl.getType(),
+  auto found = generic_decl_replacements_.find(&decl);
+  if (decl.isDefinition()) {
+    Expr &newbody = VisitExpr(decl.getBody());
+    assert(found == generic_decl_replacements_.end() ||
+           *found->second == newbody.getType());
+    return builder_.getDeclare(decl.getStart(), decl.getName(), newbody,
                                decl.isBuiltinWrite(), decl.isCDecl());
+  } else {
+    return builder_.getDeclare(decl.getStart(), decl.getName(),
+                               found == generic_decl_replacements_.end()
+                                   ? decl.getType()
+                                   : *found->second,
+                               decl.isBuiltinWrite(), decl.isCDecl());
+  }
 }
 
 Node &ASTCloner::Visit(const Composite &comp) {

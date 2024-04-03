@@ -10,10 +10,9 @@ void GetSrcLineAndArrow(const std::istream::pos_type pos, std::istream &input,
                         std::ostream &out) {
   // Save the position.
   const auto old_pos = input.tellg();
-  if (old_pos == -1) {
-    // FIXME: We shouldn't run into this.
+  if (old_pos == -1)
     return;
-  }
+
   constexpr size_t kMaxRewind = 80;  // To prevent scanning long lines,
                                      // we'll only scan backwords (and
                                      // forwards up to this many charaters).

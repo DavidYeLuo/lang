@@ -235,4 +235,19 @@ bool Type::isGenericRemainingCallable() const {
   return false;
 }
 
+void Module::AddDeclaration(std::string_view name, Declare &expr) {
+  assert(expr.getName() == name);
+  auto &decls = top_level_exprs_[std::string(name)];
+  for (Declare *decl : decls) {
+    if (expr.getType().isGeneric() == decl->getType().isGeneric())
+      assert(!expr.getType().Matches(decl->getType()));
+    else
+      assert(expr.getType() != decl->getType());
+  }
+  decls.push_back(&expr);
+  ast_.push_back(&expr);
+  if (expr.getType().isGeneric())
+    generics_.insert(&expr);
+}
+
 }  // namespace lang

@@ -37,10 +37,7 @@ class Parser {
   // used for checking or inferring types.
   Result<Expr *> ParseExpr(const Type *hint = nullptr);
   Result<Expr *> ParseExprImpl(const Type *hint);
-  // ParseCallable takes an optional name that indicates this is part of a high
-  // level `define`.
-  Result<Callable *> ParseCallable(std::string_view *name = nullptr,
-                                   const Type *hint = nullptr);
+  Result<Callable *> ParseCallable(const Type *hint = nullptr);
   // TODO: This can return either a `Call` or `AmbiguousCall`. We should
   // probably consolidate them.
   Result<Expr *> ParseCall(const Type *return_type_hint = nullptr);

@@ -154,8 +154,7 @@ Result<Declare *> Parser::ParseDeclareImpl() {
 }
 
 // <callable> ::= "\" <arg list> "->" <type> <expr>
-Result<Callable *> Parser::ParseCallable(std::string_view *callable_name,
-                                         const Type *hint) {
+Result<Callable *> Parser::ParseCallable(const Type *hint) {
   Result<Token> res = lexer_.Lex();
   if (!res)
     return res;
@@ -213,25 +212,6 @@ Result<Callable *> Parser::ParseCallable(std::string_view *callable_name,
     return type_res;
   const Type &ret_type = **type_res;
 
-  if (callable_name) {
-    const auto possible_callables =
-        getPossibleCallables(*callable_name, &arg_types);
-    if (!possible_callables.empty()) {
-      Diagnostic diag(lexer_.getInput());
-      diag << callable_loc << ": Callable `" << *callable_name
-           << "` with arg types `";
-      for (const Type *ty : arg_types) {
-        diag << ty->toString() << " ";
-      }
-      diag << "` is handled by another callable\n";
-      for (const Expr *expr : possible_callables) {
-        diag << expr->getStart() << ": note: Declared here\n"
-             << DumpLine{expr->getStart()} << "\n";
-      }
-      return diag;
-    }
-  }
-
   Callable &callable = builder_.getCallable(callable_loc, ret_type, arg_locs,
                                             arg_names, arg_types);
 
@@ -255,7 +235,6 @@ Result<Callable *> Parser::ParseCallable(std::string_view *callable_name,
            << " but instead found " << callable.getBody().getType().toString();
   }
 
-  // TODO: Check against the hint.
   return &callable;
 }
 
@@ -419,8 +398,6 @@ Result<Expr *> Parser::ParseExprImpl(const Type *hint) {
   if (!res)
     return res;
 
-  // TODO: Check the types of these if a hint is provided.
-
   if (res->getKind() == Token::TK_Call ||
       res->getKind() == Token::TK_ImpureCall)
     return ParseCall(hint);
@@ -452,7 +429,7 @@ Result<Expr *> Parser::ParseExprImpl(const Type *hint) {
   if (res->getKind() == Token::TK_LAngleBrack)
     return ParseComposite();
   if (res->getKind() == Token::TK_Lambda)
-    return ParseCallable(/*name=*/nullptr, hint);
+    return ParseCallable(hint);
   if (res->isBinOpKind())
     return ParseBinOp(hint);
 
@@ -1134,8 +1111,6 @@ Result<Cast *> Parser::ParseCast() {
     const auto &to_type = llvm::cast<ArrayType>(**type);
     const auto &from_type = llvm::cast<ArrayType>((*expr)->getType());
     if (to_type.getNumElems() < from_type.getNumElems()) {
-      // TODO: Would be nice to have a formal warning system also that doesn't
-      // involve making an error result.
       Diagnostic warn(lexer_.getInput());
       warn << loc << ": Casting from a longer " << from_type.getNumElems()
            << " length char array type to a shorter " << to_type.getNumElems()
@@ -1146,7 +1121,8 @@ Result<Cast *> Parser::ParseCast() {
 
   if (**type == (*expr)->getType()) {
     Diagnostic warn(lexer_.getInput());
-    warn << loc << ": Unnecessary cast here since types are the same";
+    warn << loc << ": Unnecessary cast here since types are the same"
+         << DumpLine{loc};
     std::cerr << warn.get() << std::endl;
   }
 

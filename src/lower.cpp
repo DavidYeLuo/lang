@@ -79,55 +79,47 @@ class ASTLowerer : public NonConstASTVisitor<> {
           builder_.getCallableType(callable_ty.getReturnType(), arg_types);
       auto existing_decls = mod_.getDeclares(decl.getName());
 
-      Declare *newdecl = [&]() {
+      Declare &newdecl = [&]() -> Declare & {
         auto found = std::find_if(existing_decls.begin(), existing_decls.end(),
                                   [&](const Declare *d) {
                                     return !d->getType().isGeneric() &&
                                            d->getType() == newdecl_ty;
                                   });
         if (found != existing_decls.end())
-          return *found;
+          return **found;
 
-        Declare *newdecl_;
+        // FIXME: Let's say we have
+        //
+        //   def writeln = \IO io GENERIC arg -> IO
+        //     let io2 = IO write(io arg)
+        //     write(io2 "\n")
+        //
+        //   # Notice this is commented out
+        //   #decl writeln = \IO GENERIC GENERIC_REMAINING -> IO
+        //   def writeln = \IO io GENERIC arg GENERIC_REMAINING remaining ->
+        //   IO
+        //     let io2 = IO write(io arg)
+        //     writeln(io2 remaining)
+        //
+        // Then the parser can only see that the last writeln call can only
+        // resolve to the first `writeln` definition. This is valid since
+        // `remaining` can be one or more arguments. We won't know until here
+        // when expanding `remaining` that it is invalid. We should check for
+        // this.
+
+        // We need to clone the declaration and its body.
+        ASTCloner cloner(builder_);
+        cloner.AddGenericDeclReplacement(decl, newdecl_ty);
         if (decl.isDefinition()) {
-          // FIXME: Let's say we have
-          //
-          //   def writeln = \IO io GENERIC arg -> IO
-          //     let io2 = IO write(io arg)
-          //     write(io2 "\n")
-          //
-          //   # Notice this is commented out
-          //   #decl writeln = \IO GENERIC GENERIC_REMAINING -> IO
-          //   def writeln = \IO io GENERIC arg GENERIC_REMAINING remaining ->
-          //   IO
-          //     let io2 = IO write(io arg)
-          //     writeln(io2 remaining)
-          //
-          // Then the parser can only see that the last writeln call can only
-          // resolve to the first `writeln` definition. This is valid since
-          // `remaining` can be one or more arguments. We won't know until here
-          // when expanding `remaining` that it is invalid. We should check for
-          // this.
-
-          // Create a new definition.
-          // We need to clone the declaration and its body.
-          ASTCloner cloner(builder_);
           const auto &body = llvm::cast<Callable>(decl.getBody());
           cloner.AddCallableTypeReplacement(body, arg_types);
-          newdecl_ = llvm::cast<Declare>(&cloner.Clone(decl));
-        } else {
-          // Create a new declaration.
-          //
-          // TODO: Can this also use the ASTCloner?
-          newdecl_ =
-              &builder_.getDeclare(decl.getStart(), decl.getName(), newdecl_ty,
-                                   decl.isBuiltinWrite(), decl.isCDecl());
         }
-        mod_.AddDeclaration(decl.getName(), *newdecl_);
+        Declare &newdecl_ = llvm::cast<Declare>(cloner.Clone(decl));
+        mod_.AddDeclaration(decl.getName(), newdecl_);
         return newdecl_;
       }();
-      assert(!newdecl->getType().isGeneric());
-      call.SwapFunc(*newdecl);
+      assert(!newdecl.getType().isGeneric());
+      call.SwapFunc(newdecl);
     }
 
     for (Expr *arg : call.getArgs())
