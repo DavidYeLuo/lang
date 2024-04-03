@@ -69,7 +69,6 @@ class ASTBuilder {
 
   If &getIf(const SourceLocation &start, Expr &cond, Expr &if_body,
             Expr &else_body) {
-    // TODO: Check body types.
     return llvm::cast<If>(*nodes_.emplace_back(
         new If(start, if_body.getType(), cond, if_body, else_body)));
   }

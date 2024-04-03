@@ -762,6 +762,9 @@ class If : public Expr {
         cond_(cond),
         if_body_(if_body),
         else_body_(else_body) {
+    assert(type == if_body.getType());
+    assert(type == else_body.getType());
+    assert(cond.getType().isNamedType(builtins::kBoolTypeName));
     cond.AddUser(*this);
     if_body.AddUser(*this);
     else_body.AddUser(*this);
@@ -781,20 +784,7 @@ class If : public Expr {
 
 class Module {
  public:
-  void AddDeclaration(std::string_view name, Declare &expr) {
-    assert(expr.getName() == name);
-    auto &decls = top_level_exprs_[std::string(name)];
-    for (Declare *decl : decls) {
-      if (expr.getType().isGeneric() == decl->getType().isGeneric())
-        assert(!expr.getType().Matches(decl->getType()));
-      else
-        assert(expr.getType() != decl->getType());
-    }
-    decls.push_back(&expr);
-    ast_.push_back(&expr);
-    if (expr.getType().isGeneric())
-      generics_.insert(&expr);
-  }
+  void AddDeclaration(std::string_view name, Declare &expr);
 
   const auto &getAST() const { return ast_; }
   const auto &getGenerics() const { return generics_; }

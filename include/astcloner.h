@@ -27,6 +27,11 @@ class ASTCloner : public ConstASTVisitor<Node &> {
     callable_type_replacement_[&callable] = argtypes;
   }
 
+  void AddGenericDeclReplacement(const Declare &decl, const Type &replacement) {
+    assert(!generic_decl_replacements_.contains(&decl));
+    generic_decl_replacements_[&decl] = &replacement;
+  }
+
 #define NODE(name) Node &Visit(const name &) override;
 #include "nodes.def"
 
@@ -70,6 +75,7 @@ class ASTCloner : public ConstASTVisitor<Node &> {
   std::map<const Callable *, std::vector<const Type *>>
       callable_type_replacement_;
   std::map<const Arg *, std::vector<Arg *>> remaining_arg_replacements_;
+  std::map<const Declare *, const Type *> generic_decl_replacements_;
 
   // Used to prevent infinite recursion when cloning self-referential callables.
   std::map<const Callable *, Callable *, std::less<>> seen_callables_;
