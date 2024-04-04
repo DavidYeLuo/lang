@@ -1,7 +1,7 @@
 decl func = \ -> <IO bool>
 
 def non_halting = \ -> <IO bool>
-  let next = <IO bool> call func end
+  let next = call func end
   if GET bool next 1
     next
   else

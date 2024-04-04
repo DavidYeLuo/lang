@@ -5,5 +5,5 @@ def apply = \int x \int -> int func -> int
   call func x end
 
 def main = \IO io -> IO
-  let x = int call apply 10 callback_func end
+  let x = call apply 10 callback_func end
   call write io x end

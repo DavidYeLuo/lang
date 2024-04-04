@@ -169,18 +169,12 @@ class ASTBuilder {
   }
 
   Set &getSet(const SourceLocation &start, Expr &expr, Expr &idx, Expr &store) {
-    assert(llvm::isa<CompositeType>(expr.getType()) ||
-           llvm::isa<ArrayType>(expr.getType()));
-    assert(idx.getType().isNamedType("int"));
     return llvm::cast<Set>(
         *nodes_.emplace_back(new Set(start, expr, idx, store)));
   }
 
   Get &getGet(const SourceLocation &start, const Type &type, Expr &expr,
               Expr &idx) {
-    assert(llvm::isa<CompositeType>(expr.getType()) ||
-           llvm::isa<ArrayType>(expr.getType()));
-    assert(idx.getType().isNamedType("int"));
     return llvm::cast<Get>(
         *nodes_.emplace_back(new Get(start, type, expr, idx)));
   }

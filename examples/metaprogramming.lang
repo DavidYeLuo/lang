@@ -1,12 +1,12 @@
 def writeln = \IO io_writeln GENERIC arg -> IO
-  let io3 = IO call write io_writeln arg end
+  let io3 = call write io_writeln arg end
   call write io3 "\n" end
 
 def writeln = \IO io GENERIC arg1 GENERIC arg2 -> IO
-  let io2 = IO call write io arg1 end
+  let io2 = call write io arg1 end
   call writeln io2 arg2 end
 
 def main = \IO io -> IO
-  let io2 = IO call writeln io "abc" end
-  let io3 = IO call writeln io2 123 end
+  let io2 = call writeln io "abc" end
+  let io3 = call writeln io2 123 end
   call writeln io3 "def" 456 end

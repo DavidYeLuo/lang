@@ -184,6 +184,8 @@ Result<Token> Lexer::LexImpl() {
     return Result<Token>(Token::TK_Let, start, end, buff);
   if (buff == "keep")
     return Result<Token>(Token::TK_Keep, start, end, buff);
+  if (buff == "as")
+    return Result<Token>(Token::TK_As, start, end, buff);
   if (buff == "zero")
     return Result<Token>(Token::TK_Zero, start, end, buff);
   if (buff == "if")

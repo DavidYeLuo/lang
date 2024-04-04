@@ -14,16 +14,16 @@ def fib = \int n -> int
     fib_impl(n 2 1 1)
 
 def writeln = \IO io_writeln GENERIC arg -> IO
-  let io3 = IO write(io_writeln arg)
+  let io3 = write(io_writeln arg)
   write(io3 "\n")
 
 def writeln = \IO io GENERIC arg1 GENERIC arg2 -> IO
-  let io2 = IO write(io arg1)
+  let io2 = write(io arg1)
   writeln(io2 arg2)
 
 def main = \IO io -> IO
-  let x = int fib(10)
-  let y = IO write(write(write(io "result is: ") x) "\n")
-  let io2 = IO writeln(y "abc")
-  let io3 = IO writeln(io2 123)
+  let x = fib(10)
+  let y = write(write(write(io "result is: ") x) "\n")
+  let io2 = writeln(y "abc")
+  let io3 = writeln(io2 123)
   writeln(io3 "def" 456)

@@ -159,35 +159,18 @@ TEST(E2E, WriteInt) {
 }
 
 TEST(E2E, If) {
-  constexpr char kIfTrueStr[] =
-      "def main = \\IO io -> IO\n"
-      "  let x = int if true 5 else 6\n"
-      "  call write io x end";
-  BuildAndCheckOutput(kIfTrueStr, "5");
+  std::ifstream input(EXAMPLES_DIR "/if-true.lang");
+  BuildAndCheckOutput(input, "5");
 
-  constexpr char kIfFalseStr[] =
-      "def main = \\IO io -> IO\n"
-      "  let x = int if false 5 else 6\n"
-      "  call write io x end";
-  BuildAndCheckOutput(kIfFalseStr, "6");
+  std::ifstream input2(EXAMPLES_DIR "/if-false.lang");
+  BuildAndCheckOutput(input2, "6");
 }
 
 TEST(E2E, Fib) {
-  constexpr char kFibStr[] =
-      "decl fib = \\int -> int              \n"
-      "def fib = \\int n -> int             \n"
-      "  if LT n 2                          \n"
-      "    n                                \n"
-      "  else                               \n"
-      "    let x = int call fib SUB n 1 end \n"
-      "    let y = int call fib SUB n 2 end \n"
-      "    ADD x y                          \n"
-      "def main = \\IO io -> IO             \n"
-      "  let x = int call fib 10 end        \n"
-      "  call write io x end";
+  std::ifstream input(EXAMPLES_DIR "/fib.lang");
 
   // fib(10) = 55
-  BuildAndCheckOutput(kFibStr, "55");
+  BuildAndCheckOutput(input, "55");
 }
 
 TEST(E2E, FibNonRecurse) {
@@ -206,34 +189,17 @@ TEST(E2E, FuncAsArgument) {
 }
 
 TEST(E2E, Readc) {
-  constexpr char kReadc[] =
-      "\
-def main = \\IO io -> IO \
-  let x = <IO int> call readc io end \
-  let io2 = IO GET IO x 0 \
-  let c = int GET int x 1 \
-  call write io2 CAST char c end";
+  std::ifstream input(EXAMPLES_DIR "/read-stdin.lang");
   std::string in("a");
-  BuildAndCheckOutput(kReadc, "a", &in);
+  BuildAndCheckOutput(input, "a", &in);
 }
 
 TEST(E2E, ReadAllStdin) {
-  constexpr char kReadc[] =
-      "\
-  decl echo = \\IO -> IO \
-  def echo = \\IO io -> IO \
-    let x = <IO int> call readc io end \
-    let io2 = IO GET IO x 0 \
-    let c = int GET int x 1 \
-    if LT c 0 \
-      io2 \
-    else \
-      let io3 = IO call write io2 CAST char c end \
-      call echo io3 end \
-  def main = \\IO io -> IO \
-    call echo io end";
-  std::string in(kReadc);
-  BuildAndCheckOutput(kReadc, kReadc, &in);
+  std::ifstream input(EXAMPLES_DIR "/read-all-stdin.lang");
+  std::string in(std::istreambuf_iterator<char>(input), {});
+  input.clear();
+  input.seekg(0);
+  BuildAndCheckOutput(input, in, &in);
 }
 
 TEST(E2E, Buffer) {

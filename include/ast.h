@@ -91,9 +91,10 @@ class Type {
   // bool isNoneType() const {
   //   return isNamedType("none");
   // }
-  const Type &getReturnType() const;
 
+  const Type &getReturnType() const;
   bool Matches(const Type &other) const;
+  bool isValidGetSetType() const;
 
  protected:
   virtual bool Equals(const Type &) const = 0;
@@ -363,6 +364,8 @@ class Set : public Expr {
         expr_(expr),
         idx_(idx),
         store_(store) {
+    assert(expr.getType().isValidGetSetType());
+    assert(idx.getType().isNamedType("int"));
     expr.AddUser(*this);
     idx.AddUser(*this);
     store.AddUser(*this);
@@ -385,6 +388,8 @@ class Get : public Expr {
  public:
   Get(const SourceLocation &start, const Type &type, Expr &expr, Expr &idx)
       : Expr(NK_Get, start, type), expr_(expr), idx_(idx) {
+    assert(expr.getType().isValidGetSetType());
+    assert(idx.getType().isNamedType("int"));
     expr.AddUser(*this);
     idx.AddUser(*this);
   }

@@ -78,7 +78,8 @@ class ArgParser {
   Argument<T> &AddPosArg(std::string_view argname) {
     auto found_arg = arg_map_.find(argname);
     if (found_arg != arg_map_.end()) {
-      err_ << "Positional argument `" << argname << "` was already registered";
+      err_ << "Positional argument `" << argname
+           << "` was already registered\n";
       return static_cast<Argument<T> &>(*found_arg->second);
     }
 
@@ -94,7 +95,7 @@ class ArgParser {
   Argument<T> &AddOptArg(std::string_view argname) {
     auto found_arg = arg_map_.find(argname);
     if (found_arg != arg_map_.end()) {
-      err_ << "Optional argument `" << argname << "` was already registered";
+      err_ << "Optional argument `" << argname << "` was already registered\n";
       return static_cast<Argument<T> &>(*found_arg->second);
     }
 
@@ -111,7 +112,7 @@ class ArgParser {
     auto it = shortname_map_.try_emplace(shortname, argname);
     if (!it.second) {
       err_ << "Optional argument `" << argname << "` with short name `"
-           << shortname << "` was already registered";
+           << shortname << "` was already registered\n";
     }
     return AddOptArg(argname);
   }
@@ -120,7 +121,7 @@ class ArgParser {
   std::unique_ptr<T> get(std::string_view argname) const {
     auto p = std::make_pair(getTypeID<T>(), std::string(argname));
     if (!arg_types_.contains(p)) {
-      err_ << "Type mismatch for argument `" << argname << "`";
+      err_ << "Type mismatch for argument `" << argname << "`\n";
       return nullptr;
     }
 
@@ -139,7 +140,7 @@ class ArgParser {
 
       err_ << "Not enough positional argument provided for `" << argname
            << "`; " << argc_ << " arguments found, but `" << argname
-           << "` is positional argument number " << idx;
+           << "` is positional argument number " << idx << "\n";
       return nullptr;
     }
 
@@ -183,7 +184,7 @@ class ArgParser {
           return std::make_unique<T>(default_cb());
 
         // Can't do anything.
-        err_ << "No argument provided for `" << argname << "`";
+        err_ << "No argument provided for `" << argname << "`\n";
         return nullptr;
       }
     }
@@ -211,7 +212,7 @@ class ArgParser {
     }
 
     err_ << "Unregistered type for `" << argname
-         << "`; ensure this type was added via `AddPosArg` or `AddOptArg`";
+         << "`; ensure this type was added via `AddPosArg` or `AddOptArg`\n";
     return nullptr;
   }
 

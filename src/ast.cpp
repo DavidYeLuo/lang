@@ -6,6 +6,11 @@
 
 namespace lang {
 
+bool Type::isValidGetSetType() const {
+  return llvm::isa<CompositeType>(this) || llvm::isa<ArrayType>(this) ||
+         isGeneric();
+}
+
 bool GenericType::Equals(const Type &other) const {
   return llvm::isa<GenericType>(other);
 }
@@ -142,6 +147,9 @@ bool Type::Matches(const Type &other) const {
       return this_callable_ty->CallableTypesMatch(*other_callable_ty);
     }
   }
+
+  if (other.isGeneric() || isGeneric())
+    return true;
 
   return *this == other;
 }

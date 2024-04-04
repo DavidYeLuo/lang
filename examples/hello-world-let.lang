@@ -1,3 +1,3 @@
 def main = \IO io -> IO
-  let write_alias = \IO [13 x char] -> IO write
+  let write_alias = write
   call write_alias io "Hello world\n" end
