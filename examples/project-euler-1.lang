@@ -1,4 +1,3 @@
-decl sum = \int int int -> int
 def sum = \int lim int x int accum -> int
   if GE x lim
     accum

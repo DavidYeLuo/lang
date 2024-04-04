@@ -1,7 +1,6 @@
 def unwrap = \char c -> <int char>
   <CAST int c c>
 
-decl func = \IO char char -> IO
 def func = \IO io char c char last -> IO
   if LT last c
     io

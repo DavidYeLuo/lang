@@ -8,6 +8,7 @@
 #include "ast.h"
 #include "astbuilder.h"
 #include "astdumper.h"
+#include "lang.h"
 #include "llvm/Support/Casting.h"
 
 namespace lang {
@@ -49,9 +50,11 @@ Result<Module *> Parser::Parse() {
   return &module_;
 }
 
+//
+// <def> ::= "def" <identifier> "=" <expr>
+//
 Result<Declare *> Parser::ParseDefineImpl() {
-  auto peek = lexer_.Peek();
-  SourceLocation def_loc = peek->getStart();
+  SourceLocation def_loc = lexer_.PeekLoc();
   Consume(Token::TK_Def);
 
   Result<Token> res = lexer_.Lex();
@@ -61,7 +64,8 @@ Result<Declare *> Parser::ParseDefineImpl() {
   if (res->getKind() != Token::TK_Identifier)
     return getErrorDiag() << res->getStart()
                           << "Expected an identifier; instead found `"
-                          << res->getChars() << "`";
+                          << res->getChars() << "`"
+                          << DumpLine{res->getStart()};
 
   std::string name(res->getChars());
 
@@ -71,44 +75,78 @@ Result<Declare *> Parser::ParseDefineImpl() {
 
   if (res->getKind() != Token::TK_Assign)
     return getErrorDiag() << res->getStart() << "Expected `=`; instead found `"
-                          << res->getChars() << "`";
+                          << res->getChars() << "`"
+                          << DumpLine{res->getStart()};
 
-  // All definitions must have a body.
-  Result<Expr *> expr_res = ParseExpr();
-  if (!expr_res)
-    return expr_res;
+  if (!lexer_.Peek()) {
+    return getErrorDiag() << res->getStart()
+                          << "Missing definition body after `=`"
+                          << DumpLine{res->getStart()};
+  }
 
-  Expr &expr = **expr_res;
+  bool parsing_callable = lexer_.Peek()->isa(Token::TK_Lambda);
+
+  Expr *body;
+  if (parsing_callable) {
+    // This definition is a lambda. We can attempt to get the type early by just
+    // parsing the callable head. This allows us to build a decl which can be
+    // used for handling callables which reference themselves.
+    Result<Callable *> callable_head_res = ParseCallableHead();
+    if (!callable_head_res)
+      return callable_head_res;
+
+    body = *callable_head_res;
+  } else {
+    // This is not a new callable. It may be a non-callable or a reference to
+    // another expression which may be an identifier. Either way, we don't know
+    // the type yet so we'll need to parse the expression before actually making
+    // a decl.
+    Result<Expr *> expr_res = ParseExpr();
+    if (!expr_res)
+      return expr_res;
+
+    body = *expr_res;
+  }
+
   auto decls = module_.getDeclares(name);
   Declare *decl;
   // This expr can correspond to more than one existing declaration. Find the
   // right one.
   auto found = std::find_if(
       decls.begin(), decls.end(),
-      [&expr](const Declare *d) { return d->getType() == expr.getType(); });
+      [&body](const Declare *d) { return d->getType() == body->getType(); });
   if (found == decls.end()) {
     // This is a new definition. Let's assert someone calling this might not
     // be ambiguous with calling any other function.
-    auto ambiguous_callable = std::find_if(
-        decls.begin(), decls.end(),
-        [&](const Declare *d) { return expr.getType().Matches(d->getType()); });
+    auto ambiguous_callable =
+        std::find_if(decls.begin(), decls.end(), [&](const Declare *d) {
+          return body->getType().Matches(d->getType());
+        });
     if (ambiguous_callable != decls.end()) {
       Diagnostic diag(getErrorDiag());
-      diag << expr.getStart() << ": Callable `" << name << "` with type `"
-           << expr.getType().toString() << "` is handled by another callable"
-           << DumpLine{expr.getStart()} << "\n"
+      diag << body->getStart() << ": Callable `" << name << "` with type `"
+           << body->getType().toString() << "` is handled by another callable"
+           << DumpLine{body->getStart()} << "\n"
            << (**ambiguous_callable).getStart() << ": note: Declared here"
            << DumpLine{(**ambiguous_callable).getStart()};
       return diag;
     }
-    decl = &builder_.getDeclare(def_loc, name, expr, /*is_write=*/false,
+    decl = &builder_.getDeclare(def_loc, name, *body, /*is_write=*/false,
                                 /*is_cdecl=*/false);
     module_.AddDeclaration(name, *decl);
   } else {
     // Found an existing one.
     assert(found != decls.end());
-    (*found)->setBody(expr);
+    (*found)->setBody(*body);
     decl = *found;
+  }
+
+  if (parsing_callable) {
+    // Finish the rest of the body.
+    Callable &callable = llvm::cast<Callable>(*body);
+    Result<Callable *> callable_res = ParseCallableBody(callable);
+    if (!callable_res)
+      return callable_res;
   }
 
   return decl;
@@ -153,21 +191,13 @@ Result<Declare *> Parser::ParseDeclareImpl() {
   return &decl;
 }
 
-// <callable> ::= "\" <arg list> "->" <type> <expr>
-Result<Callable *> Parser::ParseCallable(const Type *hint) {
-  Result<Token> res = lexer_.Lex();
-  if (!res)
-    return res;
+Result<Callable *> Parser::ParseCallableHead() {
+  SourceLocation callable_loc = lexer_.PeekLoc();
 
-  if (res->getKind() != Token::TK_Lambda)
-    return getErrorDiag() << res->getStart()
-                          << "Expected lambda start `\\`; instead found `"
-                          << res->getChars() << "`";
-
-  SourceLocation callable_loc = res->getStart();
+  Consume(Token::TK_Lambda);
 
   // Maybe parse arguments.
-  res = lexer_.Peek();
+  Result<Token> res = lexer_.Peek();
   if (!res)
     return res;
 
@@ -206,7 +236,6 @@ Result<Callable *> Parser::ParseCallable(const Type *hint) {
   Consume(Token::TK_Arrow);
 
   // Get a return type.
-  SourceLocation lambda_loc = lexer_.getCurrentLoc();
   Result<const Type *> type_res = ParseType();
   if (!type_res)
     return type_res;
@@ -214,13 +243,16 @@ Result<Callable *> Parser::ParseCallable(const Type *hint) {
 
   Callable &callable = builder_.getCallable(callable_loc, ret_type, arg_locs,
                                             arg_names, arg_types);
+  return &callable;
+}
 
+Result<Callable *> Parser::ParseCallableBody(Callable &callable) {
   // Register the variable names.
   for (size_t i = 0; i < callable.getNumArgs(); ++i)
     RegisterLocalVar(callable.getArgName(i), callable.getArg(i));
 
   // Parse the body which is just an expression.
-  Result<Expr *> expr_res = ParseExpr(&ret_type);
+  Result<Expr *> expr_res = ParseExpr(&callable.getType().getReturnType());
   if (!expr_res)
     return expr_res;
   callable.setBody(**expr_res);
@@ -228,14 +260,24 @@ Result<Callable *> Parser::ParseCallable(const Type *hint) {
   // Check the return type.
   if (callable.getType().getReturnType() != callable.getBody().getType()) {
     return getErrorDiag()
-           << lambda_loc
+           << callable.getStart()
            << ": Mismatch between callable return type and body return type; "
               "expected "
            << callable.getType().getReturnType().toString()
-           << " but instead found " << callable.getBody().getType().toString();
+           << " but instead found " << callable.getBody().getType().toString()
+           << DumpLine{callable.getStart()};
   }
 
   return &callable;
+}
+
+// <callable> ::= "\" <arg list> "->" <type> <expr>
+Result<Callable *> Parser::ParseCallable() {
+  Result<Callable *> callable_head = ParseCallableHead();
+  if (!callable_head)
+    return callable_head;
+
+  return ParseCallableBody(**callable_head);
 }
 
 // <type>         ::= <namedtype> | <callabletype> | <compositetype>
@@ -429,7 +471,7 @@ Result<Expr *> Parser::ParseExprImpl(const Type *hint) {
   if (res->getKind() == Token::TK_LAngleBrack)
     return ParseComposite();
   if (res->getKind() == Token::TK_Lambda)
-    return ParseCallable(hint);
+    return ParseCallable();
   if (res->isBinOpKind())
     return ParseBinOp(hint);
 

@@ -5,7 +5,6 @@ def writeln = \IO io GENERIC arg -> IO
 #
 # GENERIC_REMAINING indicates at least one or more arguments.
 #
-decl writeln = \IO GENERIC GENERIC_REMAINING -> IO
 def writeln = \IO io GENERIC arg GENERIC_REMAINING remaining -> IO
   let io2 = IO call write io arg end
   # This could point to either `writeln` depending on the number of args in `remaining.

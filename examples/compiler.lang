@@ -35,7 +35,6 @@ def writeln = \IO io GENERIC s -> IO
   let io2 = IO call write io s end
   call write io2 "\n" end
 
-decl writeln = \IO GENERIC GENERIC_REMAINING -> IO
 def writeln = \IO io GENERIC arg GENERIC_REMAINING remaining -> IO
   let io2 = IO write(io arg)
   writeln(io2 remaining)
@@ -43,7 +42,6 @@ def writeln = \IO io GENERIC arg GENERIC_REMAINING remaining -> IO
 def any = \bool a -> bool
   a
 
-decl any = \bool GENERIC_REMAINING -> bool
 def any = \bool a GENERIC_REMAINING remaining -> bool
   OR a any(remaining)
 
@@ -79,7 +77,6 @@ def readc_row_col = \IO io int old_row int old_col -> <IO int int int>
 # - IO
 # - The row of the last read character
 # - The col of the last read character
-decl skip_ws = \IO int int -> <IO int int int>
 def skip_ws = \IO io int old_row int old_col -> <IO int int int>
   let res = <IO int int int> call readc_row_col io old_row old_col end
   let io2 = IO GET IO res 0
@@ -106,8 +103,6 @@ def skip_ws = \IO io int old_row int old_col -> <IO int int int>
 # - The last read character
 # - The row of the last read character
 # - The col of the last read character
-decl __read_token_remaining = \IO [128 x char] int int int ->
-                              <[128 x char] IO int int int>
 def __read_token_remaining = \IO io [128 x char] buff int idx int old_row int old_col ->
                               <[128 x char] IO int int int>
   let res = <IO int int int> call readc_row_col io old_row old_col end
@@ -139,8 +134,6 @@ def __read_token_remaining = \IO io [128 x char] buff int idx int old_row int ol
 # - The last read character
 # - The row of the last read character
 # - The col of the last read character
-decl __read_string_token_impl = \IO [128 x char] int int int ->
-                                <[128 x char] IO int int int>
 def __read_string_token_impl = \IO io [128 x char] buff int idx int old_row int old_col ->
                                 <[128 x char] IO int int int>
   let next = <IO int int int> call readc_row_col io old_row old_col end
@@ -224,7 +217,6 @@ def __read_string_token = \IO io int old_row int old_col -> <[128 x char] IO int
 # - The last read character
 # - The row of the last read character
 # - The col of the last read character
-decl skip_comment_line = \IO int int -> <IO int int int>
 def skip_comment_line = \IO io int old_row int old_col -> <IO int int int>
   # Note the last read character was a '#'.
   let next = <IO int int int> call readc_row_col io old_row old_col end
@@ -253,7 +245,6 @@ def skip_comment_line = \IO io int old_row int old_col -> <IO int int int>
 # - The last char read
 # - The row of the last read character
 # - The col of the last read character
-decl read_token = \IO int int -> <[128 x char] IO int int int>
 def read_token = \IO io int old_row int old_col -> <[128 x char] IO int int int>
   let skipped = <IO int int int> call skip_ws io old_row old_col end
   let skipped_IO = IO GET IO skipped 0

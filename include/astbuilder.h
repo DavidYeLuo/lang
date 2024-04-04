@@ -97,10 +97,11 @@ class ASTBuilder {
         *nodes_.emplace_back(new Keep(start, name, expr, body)));
   }
 
-  Callable &getCallable(const SourceLocation &start, const Type &ret_type,
+  Callable &getCallable(const SourceLocation &start,
+                        const CallableType &callable_ty,
                         const std::vector<SourceLocation> &arg_starts,
-                        const std::vector<std::string> &arg_names,
-                        const std::vector<const Type *> &arg_types) {
+                        const std::vector<std::string> &arg_names) {
+    const auto &arg_types = callable_ty.getArgTypes();
     assert(arg_types.size() == arg_names.size());
     assert(arg_types.size() == arg_starts.size());
     std::vector<Arg *> args;
@@ -110,13 +111,19 @@ class ASTBuilder {
       args.push_back(ptr);
     }
 
-    const CallableType &callable_ty = getCallableType(ret_type, arg_types);
     Callable *callable = new Callable(start, callable_ty, arg_names, args);
     nodes_.emplace_back(callable);
-    for (Arg *arg : args) {
+    for (Arg *arg : args)
       arg->setParent(*callable);
-    }
     return *callable;
+  }
+
+  Callable &getCallable(const SourceLocation &start, const Type &ret_type,
+                        const std::vector<SourceLocation> &arg_starts,
+                        const std::vector<std::string> &arg_names,
+                        const std::vector<const Type *> &arg_types) {
+    const CallableType &callable_ty = getCallableType(ret_type, arg_types);
+    return getCallable(start, callable_ty, arg_starts, arg_names);
   }
 
   // const None &getNone() {

@@ -1,4 +1,3 @@
-decl fib = \int -> int
 def fib = \int n -> int
   if LT n 2
     n
