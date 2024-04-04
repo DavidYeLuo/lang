@@ -1,7 +1,7 @@
 # Language
 
-![Build Status Sanitized](https://github.com/PiJoules/lang/actions/workflows/build-sanitized-clang.yml/badge.svg)
-![Build Status Sanitized](https://github.com/PiJoules/lang/actions/workflows/build-sanitized-gcc.yml/badge.svg)
+![Build Status Sanitized w/Clang](https://github.com/PiJoules/lang/actions/workflows/build-sanitized-clang.yml/badge.svg)
+![Build Status Sanitized w/GCC](https://github.com/PiJoules/lang/actions/workflows/build-sanitized-gcc.yml/badge.svg)
 
 Hopefully I don't abandon this one also. This is the furthest I've gotten with
 any personal project.
