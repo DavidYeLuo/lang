@@ -5,9 +5,13 @@
 
 #include "argparse.h"
 
+#if defined(__clang__)
 // NOTE: It's much easier to test passing a char** when creating the string
 // literals.
 #pragma GCC diagnostic ignored "-Wwritable-strings"
+#else
+#pragma GCC diagnostic ignored "-Wwrite-strings"
+#endif
 
 namespace {
 

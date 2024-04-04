@@ -150,6 +150,7 @@ class Compiler {
     return getDIType(llvm::cast<name>(type));
 #include "types.def"
     }
+    __builtin_unreachable();
   }
 #define TYPE(name) llvm::DIType *getDIType(const name &);
 #include "types.def"

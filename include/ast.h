@@ -45,6 +45,7 @@ class Node {
     return #name;
 #include "nodes.def"
     }
+    __builtin_unreachable();
   }
 
   Node(Kind kind, const SourceLocation &start) : kind_(kind), start_(start) {}

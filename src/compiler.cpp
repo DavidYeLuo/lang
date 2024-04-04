@@ -4,7 +4,18 @@
 #include <string_view>
 #include <vector>
 
+#if defined(__clang__)
+#if defined(__has_feature)
 #define HAS_LSAN __has_feature(address_sanitizer)
+#else
+#define HAS_LSAN 0
+#endif
+#elif defined(__GNUC__)
+#define HAS_LSAN defined(__SANITIZE_ADDRESS__)
+#else
+#error "Unknown compiler"
+#endif
+
 #if HAS_LSAN
 #include <sanitizer/lsan_interface.h>
 #endif
@@ -193,6 +204,7 @@ llvm::Type *Compiler::getLLVMType(const Type &ty) const {
     return getLLVMType(llvm::cast<name>(ty));
 #include "types.def"
   }
+  __builtin_unreachable();
 }
 
 llvm::Type *Compiler::getLLVMType(const ArrayType &type) const {
@@ -502,6 +514,7 @@ llvm::Value *Compiler::getExprImpl(llvm::IRBuilder<> &builder,
     case Node::NK_If:
       return getIf(builder, llvm::cast<If>(expr));
   }
+  __builtin_unreachable();
 }
 
 llvm::Value *Compiler::getBinOp(llvm::IRBuilder<> &builder,
@@ -524,6 +537,7 @@ llvm::Value *Compiler::getBinOp(llvm::IRBuilder<> &builder,
     case BinOp::OK_Mod:
       return builder.CreateSRem(lhs, rhs);
   }
+  __builtin_unreachable();
 }
 
 llvm::Value *Compiler::getBoolExpr(llvm::IRBuilder<> &builder,

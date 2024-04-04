@@ -1,4 +1,4 @@
-name: Build + Test (Sanitized)
+name: Build + Test w/gcc (Sanitized)
 
 on:
   push:
@@ -17,7 +17,7 @@ jobs:
     - name: apt-get dependencies
       run: |
         sudo apt-get update
-        sudo apt-get -y install unzip wget cmake lsb-release software-properties-common gnupg ninja-build
+        sudo apt-get -y install unzip wget cmake lsb-release software-properties-common gnupg ninja-build g++-12 gcc-12
         wget https://apt.llvm.org/llvm.sh
         chmod +x llvm.sh
         sudo ./llvm.sh 16
@@ -26,7 +26,9 @@ jobs:
       run: |
         mkdir build
         cd build
-        cmake .. -GNinja -DCMAKE_C_COMPILER=clang-16 -DCMAKE_CXX_COMPILER=clang++-16 -DLLVM_CONFIG=llvm-config-16 -DCLANG_FORMAT=clang-format-16
+        cmake .. -GNinja -DCMAKE_C_COMPILER=gcc-12 -DCMAKE_CXX_COMPILER=g++-12 \
+          -DLLVM_CONFIG=llvm-config-16 -DCLANG_FORMAT=clang-format-16 \
+          -DCMAKE_CXX_FLAGS="-fsanitize=address -fsanitize=undefined -ftrivial-auto-var-init=pattern"
     - name: Ninja
       run: |
         cd build

@@ -37,7 +37,7 @@ class ASTCloner : public ConstASTVisitor<Node &> {
 
  private:
   Node &Visit(const Node &node) override {
-    if (const auto *callable = llvm::dyn_cast<Callable>(&node)) {
+    if (llvm::isa<Callable>(node)) {
       auto found_callable = seen_callables_.find(&node);
       if (found_callable != seen_callables_.end())
         return *found_callable->second;

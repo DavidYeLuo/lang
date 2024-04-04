@@ -36,6 +36,7 @@ std::string Mangle(const Type &type) {
       return ss.str();
     }
   }
+  __builtin_unreachable();
 }
 
 std::string Mangle(std::string_view name, const Type &type) {

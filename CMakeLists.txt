@@ -9,11 +9,30 @@ set(CLANG_FORMAT clang-format CACHE STRING "clang-format to use")
 message(STATUS "LLVM_CONFIG: ${LLVM_CONFIG}")
 message(STATUS "CLANG_FORMAT: ${CLANG_FORMAT}")
 
-set(CXXFLAGS
-    -Wall -Werror -std=c++20 -fno-rtti -fno-exceptions -g
-    -ftrivial-auto-var-init=pattern -fsanitize=address -fsanitize=undefined -fPIC)
-add_compile_options(${CXXFLAGS})
-add_link_options(-fuse-ld=lld -Wl,--gc-sections ${CXXFLAGS})
+# These will always come after -DCMAKE_C/CXX_FLAGS.
+add_compile_options(
+    # Always have warnings as errors.
+    -Wall -Werror
+
+    # Always use c++20.
+    -std=c++20
+
+    # Never enable RTTI and exceptions.
+    -fno-rtti -fno-exceptions
+
+    # Always enable debuginfo.
+    -g
+
+    -fdata-sections -ffunction-sections
+
+    # Always position independent.
+    -fPIC)
+
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+  add_compile_options(-Wno-sign-compare)
+endif()
+
+add_link_options(-Wl,--gc-sections)
 include_directories(AFTER ${CMAKE_SOURCE_DIR}/include/)
 
 execute_process(COMMAND ${LLVM_CONFIG} --cxxflags OUTPUT_VARIABLE LLVM_CONFIG_CXX_FLAGS
