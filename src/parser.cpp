@@ -258,7 +258,8 @@ Result<Callable *> Parser::ParseCallableBody(Callable &callable) {
   callable.setBody(**expr_res);
 
   // Check the return type.
-  if (callable.getType().getReturnType() != callable.getBody().getType()) {
+  if (!callable.getType().getReturnType().Matches(
+          callable.getBody().getType())) {
     return getErrorDiag()
            << callable.getStart()
            << ": Mismatch between callable return type and body return type; "
@@ -417,18 +418,19 @@ Result<Expr *> Parser::ParseExpr(const Type *hint) {
     }
   }
 
-  if (hint && !hint->isGeneric()) {
+  if (hint && !hint->isGeneric() && !expr->getType().isGeneric()) {
     if (expr->getType().isGenericCallable() && llvm::isa<CallableType>(hint)) {
       if (!llvm::cast<CallableType>(expr->getType())
                .CallableTypesMatch(llvm::cast<CallableType>(*hint))) {
-        return getErrorDiag() << loc << ": Expression type mismatch; found `"
-                              << expr->getType().toString()
-                              << "` but expected `" << hint->toString() << "`";
+        return getErrorDiag()
+               << loc << ": Expression type mismatch; found `"
+               << expr->getType().toString() << "` but expected `"
+               << hint->toString() << "`" << DumpLine{loc};
       }
     } else if (*hint != expr->getType()) {
       return getErrorDiag() << loc << ": Expression type mismatch; found `"
                             << expr->getType().toString() << "` but expected `"
-                            << hint->toString() << "`";
+                            << hint->toString() << "`" << DumpLine{loc};
     }
   }
 
@@ -444,7 +446,7 @@ Result<Expr *> Parser::ParseExprImpl(const Type *hint) {
       res->getKind() == Token::TK_ImpureCall)
     return ParseCall(hint);
   if (res->getKind() == Token::TK_Zero)
-    return ParseZero(hint);
+    return ParseZero();
   if (res->getKind() == Token::TK_Readc)
     return ParseReadc();
   if (res->getKind() == Token::TK_Str)
@@ -488,7 +490,7 @@ Result<Expr *> Parser::ParseExprImpl(const Type *hint) {
 
   return getErrorDiag() << expr_loc
                         << ": Unable to parse expression starting with `"
-                        << res->getChars() << "`";
+                        << res->getChars() << "`" << DumpLine{expr_loc};
 }
 
 // Result<const None *> Parser::ParseNone() {
@@ -608,10 +610,12 @@ Result<If *> Parser::ParseIf(const Type *hint) {
   return &builder_.getIf(if_loc, *cond.get(), *if_body.get(), *else_body.get());
 }
 
-// <keep> ::= "keep" <identifier> "=" <type> <expr> <body>
+//
+// <keep> ::= "keep" <identifier> "=" <expr> <body>
 //
 // This is similar to a Let except the body is retained in the node itself, so a
 // Keep will always be retained in the AST.
+//
 Result<Keep *> Parser::ParseKeep(const Type *hint) {
   auto keep_tok = lexer_.Peek();
   SourceLocation keep_loc = keep_tok->getStart();
@@ -634,11 +638,7 @@ Result<Keep *> Parser::ParseKeep(const Type *hint) {
 
   Consume(Token::TK_Assign);
 
-  Result<const Type *> type_res = ParseType();
-  if (!type_res)
-    return type_res;
-
-  Result<Expr *> expr_res = ParseExpr(type_res.get());
+  Result<Expr *> expr_res = ParseExpr();
   if (!expr_res)
     return expr_res;
 
@@ -651,10 +651,11 @@ Result<Keep *> Parser::ParseKeep(const Type *hint) {
   return &builder_.getKeep(keep_loc, name, **expr_res, **body_res);
 }
 
-// <let> ::= "let" <identifier> "=" <type> <expr> <body>
+//
+// <let> ::= "let" <identifier> "=" <expr> <body>
+//
 Result<Expr *> Parser::ParseLet(const Type *hint) {
-  auto let_tok = lexer_.Peek();
-  SourceLocation let_loc = let_tok->getStart();
+  SourceLocation let_loc = lexer_.PeekLoc();
   Consume(Token::TK_Let);
 
   Result<Token> res = lexer_.Lex();
@@ -674,11 +675,7 @@ Result<Expr *> Parser::ParseLet(const Type *hint) {
 
   Consume(Token::TK_Assign);
 
-  Result<const Type *> type_res = ParseType();
-  if (!type_res)
-    return type_res;
-
-  Result<Expr *> expr_res = ParseExpr(type_res.get());
+  Result<Expr *> expr_res = ParseExpr();
   if (!expr_res)
     return expr_res;
 
@@ -718,7 +715,7 @@ Result<Parser::CallableResults> Parser::ParseCallableFromArgs(
          << "` with arg types `";
     for (const Type *t : arg_types)
       diag << t->toString() << " ";
-    diag << "`";
+    diag << "`" << DumpLine{call_loc};
     return diag;
   }
 
@@ -739,7 +736,7 @@ Result<Expr *> Parser::ParseIdentifier(const Type *hint) {
   std::string_view name(res->getChars());
   if (!HasVar(name))
     return getErrorDiag() << res->getStart() << "Unknown variable `" << name
-                          << "`";
+                          << "`" << DumpLine{res->getStart()};
 
   if (const auto *callable_ty = llvm::dyn_cast_or_null<CallableType>(hint)) {
     if (HasVar(name, *callable_ty))
@@ -979,14 +976,29 @@ Result<Readc *> Parser::ParseReadc() {
   return &builder_.getReadc(loc);
 }
 
-Result<Zero *> Parser::ParseZero(const Type *hint) {
-  if (!hint) {
-    return getErrorDiag() << lexer_.PeekLoc()
-                          << ": Unable to determine type of `zero`";
-  }
+//
+// <zero> = "zero" "as" <type>
+//
+// Zero's will always require a type hint so we can determine its type.
+//
+Result<Zero *> Parser::ParseZero() {
   SourceLocation loc = lexer_.Peek()->getStart();
   Consume(Token::TK_Zero);
-  return &builder_.getZero(loc, *hint);
+
+  Result<Token> as = lexer_.Lex();
+  if (!as)
+    return as;
+
+  if (!as->isa(Token::TK_As)) {
+    return getErrorDiag() << loc << ": `zero` requires a type hint `as <type>`"
+                          << DumpLine{loc};
+  }
+
+  Result<const Type *> type_res = ParseType();
+  if (!type_res)
+    return type_res;
+
+  return &builder_.getZero(loc, **type_res);
 }
 
 // <composite> ::= "<" <expr>+ ">"
@@ -1032,9 +1044,10 @@ Result<Set *> Parser::ParseSet() {
     return composite;
 
   const Type &type = (*composite)->getType();
-  if (!(llvm::isa<CompositeType>(type) || llvm::isa<ArrayType>(type))) {
+  if (!type.isValidGetSetType()) {
     return getErrorDiag() << composite_loc
-                          << ": Expression is not a composite or array type";
+                          << ": Expression is not a composite or array type"
+                          << DumpLine{composite_loc};
   }
 
   Result<Expr *> idx = ParseExpr();

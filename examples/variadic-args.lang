@@ -1,18 +1,18 @@
 def writeln = \IO io GENERIC arg -> IO
-  let io2 = IO write(io arg)
+  let io2 = write(io arg)
   write(io2 "\n")
 
 #
 # GENERIC_REMAINING indicates at least one or more arguments.
 #
 def writeln = \IO io GENERIC arg GENERIC_REMAINING remaining -> IO
-  let io2 = IO write(io arg)
+  let io2 = write(io arg)
   # This could point to either `writeln` depending on the number of args in `remaining.
   # If there's 1, then it points to the first `writeln`.
   # Otherwise, it points back to this.
   writeln(io2 remaining)
 
 def main = \IO io -> IO
-  let io2 = IO writeln(io "abc")
-  let io3 = IO writeln(io2 123)
+  let io2 = writeln(io "abc")
+  let io3 = writeln(io2 123)
   writeln(io3 "def" 456 789 "xyz")

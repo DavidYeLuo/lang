@@ -2,10 +2,10 @@ def fib = \int n -> int
   if LT n 2
     n
   else
-    let x = int call fib SUB n 1 end
-    let y = int call fib SUB n 2 end
+    let x = call fib SUB n 1 end
+    let y = call fib SUB n 2 end
     ADD x y
 
 def main = \IO io -> IO
-  let x = int call fib 10 end
+  let x = call fib 10 end
   call write io x end

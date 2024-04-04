@@ -16,5 +16,5 @@ def fib = \int n -> int
     call fib_impl n 2 1 1 end
 
 def main = \IO io -> IO
-  let x = int call fib 10 end
+  let x = call fib 10 end
   call write io x end

@@ -25,35 +25,19 @@ TEST(Parser, GenericRemainingArgumentTypesMatch) {
   ASSERT_TRUE(callable_ty2.ArgumentTypesMatch(args));
 }
 
-TEST(Errors, ShowLineInError) {
-  constexpr char kMissingType[] =
-      "def main = \\IO io -> IO\n"
-      "  let i = 2\n"
-      "  io";
-  constexpr std::string_view kExpectedError =
-      "2:11: Expected a type; instead found `2`\n"
-      "  let i = 2\n"
-      "          ^";
-  std::stringstream input;
-  input << kMissingType;
-  lang::Lexer lexer(input);
-  lang::Parser parser(lexer);
-  auto res = parser.Parse();
-  ASSERT_TRUE(res.hasError());
-  ASSERT_EQ(res.getError(), kExpectedError);
-}
-
 TEST(Errors, ReturnTypeMismatch) {
   constexpr char kMismatch[] = "def main = \\IO io -> IO 2\n";
   constexpr std::string_view kExpectedError =
-      "1:25: Expression type mismatch; found `int` but expected `IO`";
+      "1:25: Expression type mismatch; found `int` but expected `IO`\n"
+      "def main = \\IO io -> IO 2\n"
+      "                        ^";
   std::stringstream input;
   input << kMismatch;
   lang::Lexer lexer(input);
   lang::Parser parser(lexer);
   auto res = parser.Parse();
   ASSERT_TRUE(res.hasError());
-  ASSERT_TRUE(res.getError().starts_with(kExpectedError)) << res.getError();
+  ASSERT_EQ(res.getError(), kExpectedError) << res.getError();
 }
 
 TEST(Errors, MultipleCallableOverrides) {
@@ -70,7 +54,7 @@ TEST(Errors, MultipleCallableOverrides) {
   lang::Parser parser(lexer);
   auto res = parser.Parse();
   ASSERT_TRUE(res.hasError());
-  ASSERT_TRUE(res.getError().starts_with(kExpectedError)) << res.getError();
+  ASSERT_EQ(res.getError(), kExpectedError) << res.getError();
 }
 
 TEST(Errors, VariadicMultipleCallableOverrides) {
@@ -79,12 +63,17 @@ TEST(Errors, VariadicMultipleCallableOverrides) {
   constexpr std::string_view kExpectedError =
       "5:15: Callable `writeln` with type `\\IO GENERIC GENERIC_REMAINING -> "
       "IO` "
-      "is handled by another callable\n";
+      "is handled by another callable\n"
+      "def writeln = \\IO io GENERIC arg GENERIC_REMAINING remaining -> IO\n"
+      "              ^\n"
+      "1:1: note: Declared here\n"
+      "def writeln = \\IO io GENERIC arg GENERIC arg2 -> IO\n"
+      "^";
   lang::Lexer lexer(input);
   lang::Parser parser(lexer);
   auto res = parser.Parse();
   ASSERT_TRUE(res.hasError());
-  ASSERT_TRUE(res.getError().starts_with(kExpectedError)) << res.getError();
+  ASSERT_EQ(res.getError(), kExpectedError) << res.getError();
 }
 
 }  // namespace

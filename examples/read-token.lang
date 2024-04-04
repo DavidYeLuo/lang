@@ -1,25 +1,28 @@
 def writeln_str = \IO io [128 x char] s -> IO
-  let io2 = IO call write io s end
+  let io2 = call write io s end
   call write io2 "\n" end
 
+def any = \bool a -> bool
+  a
+
+def any = \bool a GENERIC_REMAINING remaining -> bool
+  OR a any(remaining)
+
 def read_token = \IO io [128 x char] buff int idx -> <[128 x char] IO>
-  let res = <IO int> call readc io end
-  let io2 = IO GET IO res 0
-  let c = int GET int res 1
-  if OR
-       OR
-         OR
-           LT c 0
-           EQ CAST char c ' '
+  let res = call readc io end
+  let io2 = GET IO res 0
+  let c = GET int res 1
+  if any(LT c 0
+         EQ CAST char c ' '
          EQ CAST char c '\n'
-       GE idx 127
+         GE idx 127)
     <buff io2>
   else
-    let newbuff = [128 x char] SET buff idx CAST char c
+    let newbuff = SET buff idx CAST char c
     call read_token io2 newbuff ADD idx 1 end
 
 def main = \IO io -> IO
-  let res = <[128 x char] IO> call read_token io zero 0 end
+  let res = call read_token io zero as [128 x char] 0 end
   call writeln_str
     GET IO res 1
     GET [128 x char] res 0

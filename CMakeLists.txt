@@ -53,6 +53,6 @@ add_subdirectory(tests)
 
 
 # FORMATTING
-file(GLOB all_srcs CONFIGURE_DEPENDS "include/*.h" "src/*.cpp")
+file(GLOB all_srcs CONFIGURE_DEPENDS "include/*.h" "src/*.cpp" "tests/*.cpp")
 add_custom_target(format ${CLANG_FORMAT} --style=file -i ${all_srcs})
 add_custom_target(format-check ${CLANG_FORMAT} --style=file ${all_srcs} --dry-run -Werror)

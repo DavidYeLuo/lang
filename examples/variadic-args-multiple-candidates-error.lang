@@ -1,7 +1,7 @@
 def writeln = \IO io GENERIC arg GENERIC arg2 -> IO
-  let io2 = IO write(io arg)
+  let io2 = write(io arg)
   write(io2 "\n")
 
 def writeln = \IO io GENERIC arg GENERIC_REMAINING remaining -> IO
-  let io2 = IO write(io arg)
+  let io2 = write(io arg)
   writeln(io2 remaining)

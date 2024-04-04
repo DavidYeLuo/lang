@@ -41,7 +41,7 @@ class Parser {
   // TODO: This can return either a `Call` or `AmbiguousCall`. We should
   // probably consolidate them.
   Result<Expr *> ParseCall(const Type *return_type_hint = nullptr);
-  Result<Zero *> ParseZero(const Type *hint);
+  Result<Zero *> ParseZero();
   Result<Readc *> ParseReadc();
   Result<Str *> ParseStr();
   Result<Char *> ParseChar();

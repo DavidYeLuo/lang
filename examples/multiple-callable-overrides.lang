@@ -1,16 +1,16 @@
 def writeln = \IO io_writeln GENERIC arg -> IO
-  let io3 = IO write(io_writeln arg)
+  let io3 = write(io_writeln arg)
   write(io3 "\n")
 
 def writeln = \IO io GENERIC arg1 GENERIC arg2 -> IO
-  let io2 = IO write(io arg1)
+  let io2 = write(io arg1)
   writeln(io2 arg2)
 
 def writeln = \IO io int arg1 GENERIC arg2 -> IO
-  let io2 = IO write(io arg1)
+  let io2 = write(io arg1)
   writeln(io2 arg2)
 
 def main = \IO io -> IO
-  let io2 = IO writeln(io "abc")
-  let io3 = IO writeln(io2 123)
+  let io2 = writeln(io "abc")
+  let io3 = writeln(io2 123)
   writeln(io3 "def" 456)

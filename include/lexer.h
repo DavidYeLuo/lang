@@ -33,6 +33,7 @@ class Token {
     TK_True,
     TK_False,
     TK_Zero,
+    TK_As,
     TK_LAngleBrack,  // <
     TK_RAngleBrack,  // >
     TK_LSqBrack,     // [
