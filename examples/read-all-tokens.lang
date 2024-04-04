@@ -5,7 +5,6 @@ def writeln_str = \IO io [128 x char] s -> IO
 def any_3 = \bool a bool b bool c -> bool
   OR a OR b c
 
-decl skip_ws = \IO -> <IO int>
 def skip_ws = \IO io -> <IO int>
   let res = <IO int> call readc io end
   let io2 = IO GET IO res 0
@@ -17,7 +16,6 @@ def skip_ws = \IO io -> <IO int>
   else
     <io2 c>
 
-decl __read_token_remaining = \IO [128 x char] int -> <[128 x char] IO int>
 def __read_token_remaining = \IO io [128 x char] buff int idx -> <[128 x char] IO int>
   let res = <IO int> call readc io end
   let io2 = IO GET IO res 0
@@ -34,7 +32,6 @@ def __read_token_remaining = \IO io [128 x char] buff int idx -> <[128 x char] I
     let newbuff = [128 x char] SET buff idx CAST char c
     call __read_token_remaining io2 newbuff ADD idx 1 end
 
-decl __read_string_token_impl = \IO [128 x char] int -> <[128 x char] IO int>
 def __read_string_token_impl = \IO io [128 x char] buff int idx -> <[128 x char] IO int>
   let next = <IO int> call readc io end
   let next_IO = IO GET IO next 0
@@ -84,7 +81,6 @@ def read_token = \IO io int idx -> <[128 x char] IO int>
     1
     end
 
-decl read_all_tokens = \IO -> IO
 def read_all_tokens = \IO io -> IO
   let res = <[128 x char] IO int> call read_token io 0 end
   let c = int GET int res 2

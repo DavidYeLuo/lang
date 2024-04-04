@@ -37,7 +37,7 @@ class Parser {
   // used for checking or inferring types.
   Result<Expr *> ParseExpr(const Type *hint = nullptr);
   Result<Expr *> ParseExprImpl(const Type *hint);
-  Result<Callable *> ParseCallable(const Type *hint = nullptr);
+  Result<Callable *> ParseCallable();
   // TODO: This can return either a `Call` or `AmbiguousCall`. We should
   // probably consolidate them.
   Result<Expr *> ParseCall(const Type *return_type_hint = nullptr);
@@ -63,6 +63,7 @@ class Parser {
   Result<Declare *> ParseDeclareImpl();
   Result<const std::vector<Expr *>> ParseCallArguments(
       Token::TokenKind end_tok, const CallableType *callable_type = nullptr);
+
   struct CallableResults {
     std::vector<Expr *> possible_callables;
     std::vector<Expr *> args;
@@ -74,6 +75,9 @@ class Parser {
                                  Expr &maybe_callable,
                                  const std::vector<Expr *> &args, bool pure,
                                  const Type *return_type_hint = nullptr);
+
+  Result<Callable *> ParseCallableHead();
+  Result<Callable *> ParseCallableBody(Callable &callable_head);
 
   void Consume(Token::TokenKind kind) {
     [[maybe_unused]] auto res = lexer_.Lex();
@@ -98,14 +102,12 @@ class Parser {
     diag << loc << ": Ambiguous call to `" << name << "`";
     if (maybe_argtypes) {
       diag << " with arg types `";
-      for (const Type *type : *maybe_argtypes) {
+      for (const Type *type : *maybe_argtypes)
         diag << type->toString() << " ";
-      }
       diag << "`";
     }
-    for (const Expr *expr : possible_callables) {
+    for (const Expr *expr : possible_callables)
       diag << DumpLine{expr->getStart()} << "\n";
-    }
     return diag;
   }
 
