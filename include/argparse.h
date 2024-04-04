@@ -18,7 +18,10 @@
 
 namespace argparse {
 
-class ArgumentBase {};
+class ArgumentBase {
+ public:
+  virtual ~ArgumentBase() = default;
+};
 
 template <typename T>
 constexpr bool CanStoreTrueFalse() {

@@ -85,7 +85,6 @@ class Diagnostic {
     return *this;
   }
 
-  template <>
   Diagnostic &operator<<(const DumpLine &other) {
     GetSrcLineAndArrow(other.loc.getPositionIndicator(), input_, ss_);
     return *this;

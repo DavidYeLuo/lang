@@ -15,6 +15,7 @@ class ConstASTVisitor {
     return Visit(llvm::cast<name>(node));
 #include "nodes.def"
     }
+    __builtin_unreachable();
   }
 
  protected:
@@ -32,6 +33,7 @@ class NonConstASTVisitor {
     return Visit(llvm::cast<name>(node));
 #include "nodes.def"
     }
+    __builtin_unreachable();
   }
 
  protected:
