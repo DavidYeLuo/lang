@@ -39,20 +39,26 @@ $ ninja
 
 Useful cmake flags:
 
-- **-DCMAKE_CXX_COMPILER=...**: Path to C++ compiler (and linker) to use.
-- **-DCMAKE_C_COMPILER=...**: Path to C compiler to use. This is really only
-  used by tests to link object files.
-- **-DLLVM_CONFIG=...**: Specifies the path to an `llvm-config` to use. By
-  default this points to `llvm-config`.
-- **-DCLANG_FORMAT=...**: Specifies the path to a `clang-format` to use. By
-  default this points to `clang-format`. This is only needed for formatting.
-- **-DCMAKE_CXX_FLAGS=...**: Extra flags to pass to the compiler. The github
-  actions sanitized builder sets these as `"-fsanitize=address
-  -fsanitize=undefined -ftrivial-auto-var-init=pattern"`.
-- **-DCMAKE_EXE_LINKER_FLAGS=**: Link flags to use. The github actions sanitized
-  builder sets this to `"-fuse-ld=lld"`.
-- **-DCMAKE_CXX_COMPILER_LAUNCHER=ccache**: Useful for local rebuilds.
-- **-DCMAKE_EXPORT_COMPILE_COMMANDS=ON**: Build `compile_commands.json`.
+- **-DCMAKE_CXX_COMPILER=...**
+  - Path to C++ compiler (and linker) to use.
+- **-DCMAKE_C_COMPILER=...**
+  - Path to C compiler to use. This is really only used by tests to link object files.
+- **-DLLVM_CONFIG=...**
+  - Specifies the path to an `llvm-config` to use. By default this points to `llvm-config`.
+- **-DCLANG_FORMAT=...**
+  - Specifies the path to a `clang-format` to use. By
+    default this points to `clang-format`. This is only needed for formatting.
+- **-DCMAKE_CXX_FLAGS=...**
+  - Extra flags to pass to the compiler. The github
+    actions sanitized builder sets these as `"-fsanitize=address
+    -fsanitize=undefined -ftrivial-auto-var-init=pattern"`.
+- **-DCMAKE_EXE_LINKER_FLAGS=...**
+  - Link flags to use. The github actions sanitized
+    builder sets this to `"-fuse-ld=lld"`.
+- **-DCMAKE_CXX_COMPILER_LAUNCHER=ccache**
+  - Useful for local rebuilds.
+- **-DCMAKE_EXPORT_COMPILE_COMMANDS=ON**
+  - Build `compile_commands.json`.
 
 ## Test
 
@@ -68,7 +74,7 @@ The github actions can also be tested locally via  docker containers using
 [act](https://github.com/nektos/act).
 
 ```
-$ act --workflows .github/workflows/build-sanitized.yml
+$ act --workflows .github/workflows/build-sanitized-clang.yml
 ```
 
 The github actions builder uses this configuration:
