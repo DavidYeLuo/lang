@@ -22,14 +22,209 @@
 
 #include "astdumper.h"
 #include "compiler.h"
+#include "llvm/Analysis/CGSCCPassManager.h"
+#include "llvm/Analysis/LoopAnalysisManager.h"
 #include "llvm/IR/DIBuilder.h"
 #include "llvm/IR/DebugInfoMetadata.h"
+#include "llvm/IR/IRBuilder.h"
+#include "llvm/IR/LLVMContext.h"
+#include "llvm/IR/LegacyPassManager.h"
+#include "llvm/IR/Module.h"
+#include "llvm/IR/PassManager.h"
+#include "llvm/IR/Verifier.h"
+#include "llvm/MC/TargetRegistry.h"
+#include "llvm/Passes/OptimizationLevel.h"
+#include "llvm/Passes/PassBuilder.h"
 #include "llvm/Support/Casting.h"
+#include "llvm/Support/FileSystem.h"
+#include "llvm/Support/TargetSelect.h"
 #include "llvm/Support/raw_os_ostream.h"
 #include "llvm/Support/raw_ostream.h"
+#include "llvm/Target/TargetMachine.h"
+#include "llvm/Target/TargetOptions.h"
+#include "llvm/TargetParser/Host.h"
+#include "llvm/Transforms/Instrumentation/AddressSanitizer.h"
+#include "llvm/Transforms/Instrumentation/AddressSanitizerOptions.h"
 #include "mangle.h"
 
 namespace lang {
+
+namespace {
+
+class Compiler {
+ public:
+  Compiler(lang::Module &lang_mod, llvm::Module &mod)
+      : Compiler(lang_mod, mod, "") {}
+
+  Compiler(lang::Module &lang_mod, llvm::Module &mod,
+           const std::filesystem::path &source_path)
+      : mod_(mod),
+        di_builder_(mod),
+        di_unit_(
+            source_path.empty()
+                ? *di_builder_.createFile(/*Filename=*/"<input>",
+                                          /*Directory=*/".")
+                : *di_builder_.createFile(source_path.filename().c_str(),
+                                          source_path.parent_path().c_str())),
+        di_cu_(*di_builder_.createCompileUnit(
+            llvm::dwarf::DW_LANG_C, &di_unit_,
+            /*Producer=*/"Lang Compiler", /*isOptimized=*/false, /*Flags=*/"",
+            /*RuntimeVersion=*/0)) {}
+
+  llvm::DIBuilder &getDIBuilder() { return di_builder_; }
+
+  void CompileDeclare(const Declare &declare);
+
+  llvm::Value *getExpr(llvm::IRBuilder<> &builder, const Expr &expr);
+  llvm::Value *getDeclare(const Declare &declare);
+  // Generate code that checks if the resulting expression value is equal to
+  // zero.
+  llvm::Value *getBoolExpr(llvm::IRBuilder<> &builder, const Expr &expr);
+  llvm::Value *getCallable(llvm::IRBuilder<> &builder,
+                           const Callable &callable);
+  llvm::Value *getLet(llvm::IRBuilder<> &builder, const Let &let);
+  llvm::Value *getKeep(llvm::IRBuilder<> &builder, const Keep &keep);
+  llvm::Value *getCall(llvm::IRBuilder<> &builder, const Call &call);
+  llvm::Value *getZero(llvm::IRBuilder<> &, const Zero &);
+  llvm::Value *ManifestWrite(const Declare &write);
+  llvm::Value *getReadc(llvm::IRBuilder<> &builder, const Readc &readc);
+  llvm::Value *getBinOp(llvm::IRBuilder<> &builder, const BinOp &binop);
+  llvm::Value *getIf(llvm::IRBuilder<> &builder, const If &);
+  llvm::Value *getCast(llvm::IRBuilder<> &builder, const Cast &);
+  llvm::Value *getGet(llvm::IRBuilder<> &builder, const Get &);
+  llvm::Value *getSet(llvm::IRBuilder<> &builder, const Set &);
+  llvm::Value *getComposite(llvm::IRBuilder<> &builder, const Composite &);
+
+  llvm::Type *getLLVMType(const Expr &expr) const {
+    return getLLVMType(expr.getType());
+  }
+  llvm::FunctionType *getLLVMFuncType(const Expr &expr) const {
+    return getLLVMFuncType(expr.getType());
+  }
+  llvm::Type *getLLVMType(const Type &ty) const;
+  llvm::Type *getLLVMType(const NamedType &type) const;
+  llvm::Type *getLLVMType(const CompositeType &ty) const;
+  llvm::Type *getLLVMType(const ArrayType &ty) const;
+  llvm::Type *getLLVMType(const CallableType &ty) const {
+    return getLLVMFuncType(ty);
+  }
+  llvm::Type *getLLVMType(const GenericType &ty) const {
+    UNREACHABLE("Generic types should not be directly used for code emission.");
+    return nullptr;
+  }
+  llvm::FunctionType *getLLVMFuncType(const CallableType &ty) const;
+  llvm::FunctionType *getLLVMFuncType(const Type &ty) const {
+    return getLLVMFuncType(llvm::cast<CallableType>(ty));
+  }
+
+  llvm::Value *getStr(llvm::IRBuilder<> &builder, const Str &str) const {
+    return builder.CreateGlobalStringPtr(str.get());
+  }
+  llvm::Value *getChar(llvm::IRBuilder<> &builder, const Char &c) const {
+    return llvm::ConstantInt::getSigned(getCharType(), c.getChar());
+  }
+
+ private:
+  //
+  // Say we have a declaration:
+  //
+  //   decl func = \<comp-or-arr-type> a <integer> b <char array> c ->
+  //   <comp-or-arr-type>
+  //
+  // We need to determine the calling convention. How do we return composite or
+  // array types? How do we know if we can mutate or SET any of the parameters?
+  // If the function body is defined externally, we need to know based on the
+  // function signature.
+  //
+  enum ReturnStrategy {
+    // The return type should just be the LLVM equivalent of the lang return
+    // type. Usually stuff that fits into a register can fit here (ints, floats,
+    // pointers, etc). No changes are needed for the function.
+    ReturnNormalType,
+
+    // The return type should be void and instead the caller allocates a buffer
+    // for enough space for the lang return type. The function is changed such
+    // that a pointer to this buffer will be the actual return type and the
+    // actual arguments come after it. This is reserved for array or composite
+    // types.
+    ReturnAsFirstArg,
+
+    // The return type should be a pointer and the return value is just the
+    // first argument to the function. This is reserved for array and composite
+    // types where we know the only thing that changed is the first argument and
+    // we end up returning only the first argument.
+    //
+    // NOTE: We can only do this if we know for sure the first argument is
+    // mutable (ie. not constant).
+    ReturnFirstArgInPlace,
+  };
+
+  ReturnStrategy getCallableReturnStrategy(const CallableType &type) const {
+    const Type &ret = type.getReturnType();
+
+    // We should return composite/array types via the first argument because
+    // they may be too large for a return type for LLVM.
+    if (!ret.isCompositeOrArrayType())
+      return ReturnNormalType;
+
+    // However, since this callable now owns all of the expressions passed it
+    // it, if the very first allocation has the exact same type as the return
+    // type, then we can just return the first argument as a pointer and make
+    // any local edits to that.
+    if (type.getNumArgs() > 0 && ret.CanConvertFrom(type.getArgType(0)))
+      return ReturnFirstArgInPlace;
+
+    return ReturnAsFirstArg;
+  }
+
+  llvm::Function *getCPrintf() const;
+  llvm::Function *getCGetc() const;
+  llvm::Value *getLoadedCStdin(llvm::IRBuilder<> &builder) const;
+
+  llvm::IntegerType *getIntType(size_t num_bits) const {
+    return llvm::IntegerType::get(mod_.getContext(), num_bits);
+  }
+
+  llvm::Type *getStrType() const { return getCharType()->getPointerTo(); }
+  llvm::Type *getCharType() const { return getIntType(8); }
+
+  llvm::Function *getMainWrapper(llvm::FunctionType *func_ty) const;
+
+  llvm::Value *getExprImpl(llvm::IRBuilder<> &builder, const Expr &expr);
+
+  // This exists to handle PHI nodes where calling Value::replaceAllUsesWith
+  // doesn't also replace the incoming values of the phi node with the
+  // replacement.
+  void ReplaceAllUsesWith(llvm::Value *replacement, llvm::Value *replacing);
+
+  // This also handles storing large data structures like composites or arrays
+  // into pointers which will involve memcpys.
+  void DoStore(llvm::IRBuilder<> &builder, llvm::Value *store_ptr,
+               const Expr &expr);
+
+  void FillFuncBody(const Callable &callable, llvm::Function *func,
+                    std::string_view name);
+
+  llvm::DIType *getDIType(const Type &type) {
+    switch (type.getKind()) {
+#define TYPE(name)      \
+  case Type::TK_##name: \
+    return getDIType(llvm::cast<name>(type));
+#include "types.def"
+    }
+    __builtin_unreachable();
+  }
+#define TYPE(name) llvm::DIType *getDIType(const name &);
+#include "types.def"
+
+  llvm::Module &mod_;
+  std::unique_ptr<NamedType> io_type_;
+  std::unique_ptr<NamedType> str_type_;
+  std::map<const Node *, llvm::Value *> processed_exprs_;
+  llvm::DIBuilder di_builder_;
+  llvm::DIFile &di_unit_;
+  llvm::DICompileUnit &di_cu_;
+};
 
 llvm::DIType *Compiler::getDIType(const NamedType &named_ty) {
   if (named_ty.getName() == builtins::kIOTypeName)
@@ -167,8 +362,8 @@ llvm::Function *Compiler::getMainWrapper(llvm::FunctionType *func_ty) const {
 
 llvm::FunctionType *Compiler::getLLVMFuncType(const CallableType &ty) const {
   std::vector<llvm::Type *> func_args;
-  bool return_as_arg = ShouldReturnValueAsArgument(ty.getReturnType());
-  if (return_as_arg) {
+  ReturnStrategy return_strat = getCallableReturnStrategy(ty);
+  if (return_strat == ReturnAsFirstArg) {
     // The return type of this function is too large to return in IR (such as a
     // composite type with many elements). So we should instead allocate the
     // buffer in the caller and the function is in charge of "returning" the
@@ -178,11 +373,10 @@ llvm::FunctionType *Compiler::getLLVMFuncType(const CallableType &ty) const {
 
   for (const Type *arg_ty : ty.getArgTypes()) {
     llvm::Type *llvm_arg_ty = getLLVMType(*arg_ty);
-    if (!llvm_arg_ty->isFirstClassType()) {
+    if (!llvm_arg_ty->isFirstClassType() || llvm::isa<CompositeType>(arg_ty) ||
+        llvm::isa<ArrayType>(arg_ty)) {
       // Function arguments must have first-class types!
-      llvm_arg_ty = llvm::PointerType::getUnqual(mod_.getContext());
-    } else if (llvm::isa<CompositeType>(arg_ty) ||
-               llvm::isa<ArrayType>(arg_ty)) {
+      //
       // Composite types result in LLVM struct types, but we manifest composite
       // types as allocas (ptr types), so when passed as arguments, we should
       // ensure they are represented as pointers.
@@ -190,9 +384,11 @@ llvm::FunctionType *Compiler::getLLVMFuncType(const CallableType &ty) const {
     }
     func_args.push_back(llvm_arg_ty);
   }
-  llvm::Type *ret_ty = return_as_arg ? llvm::Type::getVoidTy(mod_.getContext())
-                                     : getLLVMType(ty.getReturnType());
-  if (llvm::isa<CallableType>(ty.getReturnType()))
+  llvm::Type *ret_ty = return_strat == ReturnAsFirstArg
+                           ? llvm::Type::getVoidTy(mod_.getContext())
+                           : getLLVMType(ty.getReturnType());
+  if (llvm::isa<CallableType>(ty.getReturnType()) ||
+      return_strat == ReturnFirstArgInPlace)
     ret_ty = llvm::PointerType::getUnqual(mod_.getContext());
   return llvm::FunctionType::get(ret_ty, func_args, /*isVarArg=*/false);
 }
@@ -252,91 +448,25 @@ void Compiler::ReplaceAllUsesWith(llvm::Value *replacement,
   }
 }
 
-const Expr &ResolveLets(const Expr &expr) {
-  if (const auto *let = llvm::dyn_cast<Let>(&expr))
-    return ResolveLets(let->getExpr());
-  return expr;
-}
-
-llvm::Value *Compiler::ManifestGenericCallable(llvm::IRBuilder<> &builder,
-                                               const Call &call) {
-  const CallableType &callable_ty =
-      llvm::cast<CallableType>(call.getFunc().getType());
-  assert(callable_ty.isGenericCallable());
-
-  std::vector<const Expr *> args;
-  auto old_generic_exprs_ = applied_generic_exprs_;
-  ASTBuilder astbuilder;
-
-  const Expr *dummy_func;
-  const Expr &func = ResolveLets(call.getFunc());
-
-  // Attempt to match the arguments to the parameters.
-  std::vector<const Type *> arg_types;
-  for (size_t i = 0; i < call.getNumArgs(); ++i) {
-    arg_types.push_back([&]() -> const Type * {
-      if (!callable_ty.getArgType(i).isGeneric())
-        return &callable_ty.getArgType(i);
-      if (!call.getArgAt(i).getType().isGeneric())
-        return &call.getArgAt(i).getType();
-      auto found =
-          applied_generic_exprs_.find(&llvm::cast<Arg>(call.getArgAt(i)));
-      assert(found != applied_generic_exprs_.end());
-      return &found->second->getType();
-    }());
-    assert(!arg_types.back()->isGeneric());
-  }
-
-  if (const auto *decl = llvm::dyn_cast<Declare>(&func)) {
-    const auto &new_callable_ty =
-        astbuilder.getCallableType(callable_ty.getReturnType(), arg_types);
-    dummy_func = &astbuilder.getDeclare(func.getStart(), decl->getName(),
-                                        new_callable_ty, /*is_write=*/false,
-                                        /*is_cdecl=*/false);
-  } else {
-    const Callable &callable = llvm::cast<Callable>(func);
-
-    Callable &newcallable = astbuilder.getCallable(
-        callable.getStart(), callable.getType().getReturnType(),
-        callable.getArgLocs(), callable.getArgNames(), arg_types);
-    for (size_t i = 0; i < newcallable.getNumArgs(); ++i) {
-      applied_generic_exprs_[&callable.getArg(i)] = &newcallable.getArg(i);
-    }
-    newcallable.setBody(const_cast<Expr &>(callable.getBody()));
-    dummy_func = &newcallable;
-
-    auto found = named_generic_callables_.find(&callable);
-    if (found != named_generic_callables_.end()) {
-      named_generic_callables_[llvm::cast<Callable>(dummy_func)] =
-          found->second;
-    }
-  }
-
-  assert(!dummy_func->getType().isGeneric());
-
-  Call dummy_call(call.getStart(), call.getType(),
-                  const_cast<Expr &>(*dummy_func), call.getArgs(),
-                  call.isPure());
-
-  llvm::Value *result = getCall(builder, dummy_call);
-  applied_generic_exprs_ = old_generic_exprs_;
-  return result;
-}
-
 llvm::Value *Compiler::getCallable(llvm::IRBuilder<> &builder,
                                    const Callable &callable) {
-  std::string name = [&]() -> std::string {
-    auto found = named_generic_callables_.find(&callable);
-    if (found == named_generic_callables_.end())
-      return "";
-    return Mangle(found->second, callable.getType());
-  }();
   llvm::FunctionType *llvm_func_ty = getLLVMFuncType(callable.getType());
   llvm::Function *func = llvm::Function::Create(
-      llvm_func_ty, llvm::Function::ExternalLinkage, name, mod_);
+      llvm_func_ty, llvm::Function::ExternalLinkage, "", mod_);
 
-  FillFuncBody(callable, func, name);
+  FillFuncBody(callable, func, "");
   return func;
+}
+
+static bool ResolvesToAlloca(llvm::Value *val) {
+  if (auto *phi = llvm::dyn_cast<llvm::PHINode>(val)) {
+    for (llvm::Value *incoming : phi->incoming_values()) {
+      if (ResolvesToAlloca(incoming))
+        return true;
+    }
+  }
+
+  return llvm::isa<llvm::AllocaInst>(val);
 }
 
 void Compiler::FillFuncBody(const Callable &callable, llvm::Function *func,
@@ -352,13 +482,14 @@ void Compiler::FillFuncBody(const Callable &callable, llvm::Function *func,
       llvm::DISubprogram::SPFlagDefinition);
   func->setSubprogram(SP);
 
-  const Type &ty = callable.getType();
-  bool return_as_arg = ShouldReturnValueAsArgument(ty.getReturnType());
-  if (return_as_arg)
+  const CallableType &ty = callable.getType();
+  ReturnStrategy return_strat = getCallableReturnStrategy(ty);
+  if (return_strat == ReturnAsFirstArg)
     func->getArg(0)->setName("return_val");
 
   for (size_t i = 0; i < callable.getNumArgs(); ++i)
-    func->getArg(i + return_as_arg)->setName(callable.getArgName(i));
+    func->getArg(i + (return_strat == ReturnAsFirstArg))
+        ->setName(callable.getArgName(i));
 
   // Create the function body.
   llvm::BasicBlock *bb =
@@ -368,11 +499,18 @@ void Compiler::FillFuncBody(const Callable &callable, llvm::Function *func,
   auto processed_exprs_cpy = processed_exprs_;
   llvm::Value *ret = getExpr(nested_builder, callable.getBody());
   processed_exprs_ = processed_exprs_cpy;
-  if (return_as_arg) {
-    ReplaceAllUsesWith(func->getArg(0), ret);
-    nested_builder.CreateRetVoid();
-  } else {
-    nested_builder.CreateRet(ret);
+  switch (return_strat) {
+    case ReturnAsFirstArg:
+      ReplaceAllUsesWith(func->getArg(0), ret);
+      nested_builder.CreateRetVoid();
+      break;
+    case ReturnNormalType:
+    case ReturnFirstArgInPlace:
+      assert(
+          !ResolvesToAlloca(ret) &&
+          "Returning a pointer to an alloca can result in a use-after-return");
+      nested_builder.CreateRet(ret);
+      break;
   }
 
   assert(func->getSubprogram());
@@ -427,12 +565,6 @@ llvm::Value *Compiler::getExpr(llvm::IRBuilder<> &builder, const Expr &expr) {
   if (found != processed_exprs_.end())
     return found->second;
 
-  if (const Arg *arg = llvm::dyn_cast<Arg>(&expr)) {
-    auto found_arg = applied_generic_exprs_.find(arg);
-    if (found_arg != applied_generic_exprs_.end())
-      return getExpr(builder, *found_arg->second);
-  }
-
   if (const auto *callable = llvm::dyn_cast<Callable>(&expr)) {
     // A callable will be in charge of creating its own global and caching
     // itself.
@@ -468,8 +600,6 @@ llvm::Value *Compiler::getExprImpl(llvm::IRBuilder<> &builder,
     }
     case Node::NK_AmbiguousCall:
       UNREACHABLE("This should've been resolved during lowering");
-    // case Node::NK_None:
-    //   return getNone();
     case Node::NK_Get:
       return getGet(builder, llvm::cast<Get>(expr));
     case Node::NK_Set:
@@ -635,11 +765,32 @@ llvm::Value *Compiler::getReadc(llvm::IRBuilder<> &builder,
 }
 
 llvm::Value *Compiler::getZero(llvm::IRBuilder<> &builder, const Zero &zero) {
-  llvm::AllocaInst *alloc = builder.CreateAlloca(getLLVMType(zero));
-  size_t size = *alloc->getAllocationSize(mod_.getDataLayout());
-  builder.CreateMemSet(alloc, llvm::Constant::getNullValue(getIntType(8)), size,
-                       llvm::MaybeAlign());
-  return alloc;
+  const Type &t = zero.getType();
+
+  if (t.isMutable()) {
+    // This is always mutable, so lets make it a stack allocation.
+    llvm::AllocaInst *alloc = builder.CreateAlloca(getLLVMType(zero));
+    size_t size = *alloc->getAllocationSize(mod_.getDataLayout());
+    builder.CreateMemSet(alloc, llvm::Constant::getNullValue(getIntType(8)),
+                         size, llvm::MaybeAlign());
+    return alloc;
+  }
+
+  // These can be just constants.
+  if (t.isCompositeOrArrayType()) {
+    // This is a constant, so we can just create a global variable.
+    auto *initializer = llvm::Constant::getNullValue(getLLVMType(t));
+    auto *glob =
+        new llvm::GlobalVariable(mod_, getLLVMType(t), /*isConstant=*/true,
+                                 /*Linkage=*/llvm::GlobalValue::ExternalLinkage,
+                                 initializer, /*name=*/"");
+    return glob;
+  } else if (llvm::isa<CallableType>(t)) {
+    UNREACHABLE("TODO: Determine if this is possible?");
+  } else {
+    // This can just be a constant zero of whatever the underlying type is.
+    return llvm::Constant::getNullValue(getLLVMType(t));
+  }
 }
 
 llvm::Value *Compiler::ManifestWrite(const Declare &write) {
@@ -693,48 +844,16 @@ llvm::Value *Compiler::getGet(llvm::IRBuilder<> &builder, const Get &get) {
 
 llvm::Value *Compiler::getSet(llvm::IRBuilder<> &builder, const Set &set) {
   llvm::Value *expr = getExpr(builder, set.getExpr());
-
-  // NOTE: This can lead to multiple copies of the same buffer for code like
-  // this:
-  //
-  //   def write_to_buff = \[3 x str] buff int x str s -> [3 x str]
-  //     SET buff x s
-  //
-  //   def main = \IO io -> IO
-  //     let buff = [3 x str] zero
-  //     let buff2 = [3 x str] call write_to_buff buff 0 "abc" end
-  //     let buff3 = [3 x str] call write_to_buff buff2 1 "xyz" end
-  //     let buff4 = [3 x str] call write_to_buff buff3 2 "123" end
-  //     ...
-  //
-  // This will result in 4 separate buffers that result in 3 different memcpys.
-  // In the general case, this is correct since if we had something like:
-  //
-  //   def main = \IO io -> IO
-  //     let buff = [3 x str] zero
-  //     let buff2 = [3 x str] call write_to_buff buff 0 "abc" end
-  //     let buff3 = [3 x str] call write_to_buff buff2 1 "xyz" end
-  //     let buff4 = [3 x str] call write_to_buff buff3 2 "123" end
-  //     let something = int call buff2 end  # Do something with one of the
-  //     older buffers.
-  //     ...
-  //
-  // then the separate buffers are necessary since we'd need to handle the case
-  // where we do something to the original buffer. Stack space can be retrieved
-  // if we were able to assert each buffer was used exactly once (such as in the
-  // first example).
-  //
+  if (auto *glob = llvm::dyn_cast<llvm::GlobalVariable>(expr)) {
+    assert(!glob->isConstant() && "Attempting to store to a constant global");
+  }
   llvm::Type *expr_ty = getLLVMType(set.getExpr());
-  llvm::AllocaInst *cpy = builder.CreateAlloca(getLLVMType(set));
-  size_t size = *cpy->getAllocationSize(mod_.getDataLayout());
-  builder.CreateMemCpy(cpy, llvm::MaybeAlign(), expr, llvm::MaybeAlign(), size);
-
   llvm::Value *gep =
-      builder.CreateGEP(expr_ty, cpy,
+      builder.CreateGEP(expr_ty, expr,
                         {llvm::Constant::getNullValue(getIntType(32)),
                          getExpr(builder, set.getIdx())});
   DoStore(builder, gep, set.getStore());
-  return cpy;
+  return expr;
 }
 
 llvm::Value *Compiler::getCast(llvm::IRBuilder<> &builder, const Cast &cast) {
@@ -779,8 +898,6 @@ llvm::Value *Compiler::getCast(llvm::IRBuilder<> &builder, const Cast &cast) {
         builder.CreateMemCpy(alloc, llvm::MaybeAlign(), expr,
                              llvm::MaybeAlign(), from_size);
         return alloc;
-      } else if (to_arr.getNumElems() < from_arr.getNumElems()) {
-        return expr;
       } else {
         return expr;
       }
@@ -812,9 +929,9 @@ llvm::Value *Compiler::getCall(llvm::IRBuilder<> &builder, const Call &call) {
   assert(!call.getFunc().getType().isGeneric());
 
   std::vector<llvm::Value *> args;
-  const Type &func_type = call.getFunc().getType();
-  bool return_as_arg = ShouldReturnValueAsArgument(func_type.getReturnType());
-  if (return_as_arg) {
+  const auto &func_type = llvm::cast<CallableType>(call.getFunc().getType());
+  ReturnStrategy return_strat = getCallableReturnStrategy(func_type);
+  if (return_strat == ReturnAsFirstArg) {
     // The return type of this function is too large to return in IR (such as a
     // composite type with many elements). So we should instead allocate the
     // buffer in the caller and the function is in charge of "returning" the
@@ -839,7 +956,7 @@ llvm::Value *Compiler::getCall(llvm::IRBuilder<> &builder, const Call &call) {
   ret->setDebugLoc(
       llvm::DILocation::get(di_unit_.getContext(), call.getStart().getRow(),
                             call.getStart().getCol(), func->getSubprogram()));
-  return return_as_arg ? args.front() : ret;
+  return return_strat == ReturnAsFirstArg ? args.front() : ret;
 }
 
 void Compiler::DoStore(llvm::IRBuilder<> &builder, llvm::Value *store_ptr,
@@ -868,18 +985,22 @@ llvm::Value *Compiler::getComposite(llvm::IRBuilder<> &builder,
   return buff;
 }
 
+}  // namespace
+
 bool Compile(lang::Module &mod, std::string_view outfile, DumpType dump,
-             std::filesystem::path source) {
+             const std::filesystem::path &source,
+             llvm::OptimizationLevel optlvl, bool sanitize_address) {
   std::ofstream out(outfile.data());
   if (!out) {
     std::cerr << "Could not open file " << outfile << std::endl;
     return false;
   }
-  return Compile(mod, out, dump, outfile, source);
+  return Compile(mod, out, dump, outfile, source, optlvl, sanitize_address);
 }
 
 bool Compile(lang::Module &lang_mod, std::ostream &out, DumpType dump,
-             std::string_view modname, std::filesystem::path source) {
+             std::string_view modname, const std::filesystem::path &source,
+             llvm::OptimizationLevel optlvl, bool sanitize_address) {
 #if HAS_LSAN
   // lsan with libLLVM-16 is reporting leaks from within llvm internals.
   __lsan::ScopedDisabler disable;
@@ -950,10 +1071,32 @@ bool Compile(lang::Module &lang_mod, std::ostream &out, DumpType dump,
   PB.registerLoopAnalyses(LAM);
   PB.crossRegisterProxies(LAM, FAM, CGAM, MAM);
 
+  llvm::ModulePassManager MPM;
+  MPM.addPass(llvm::VerifierPass());
+
+  if (optlvl != llvm::OptimizationLevel::O0)
+    MPM.addPass(PB.buildPerModuleDefaultPipeline(optlvl));
+
+  if (sanitize_address) {
+    llvm::AddressSanitizerOptions Opts;
+    Opts.CompileKernel = false;
+    Opts.Recover = false;
+    Opts.UseAfterScope = true;
+    Opts.UseAfterReturn = llvm::AsanDetectStackUseAfterReturnMode::Always;
+    MPM.addPass(llvm::AddressSanitizerPass(Opts, /*UseGlobalGC=*/false,
+                                           /*UseOdrIndicator=*/true,
+                                           llvm::AsanDtorKind::Global));
+
+    for (llvm::Function &func : mod.functions())
+      func.addFnAttr(llvm::Attribute::AttrKind::SanitizeAddress);
+  }
+
+  MPM.run(mod, MAM);
+
   llvm::raw_os_ostream dest(out);
 
   switch (dump) {
-    case File: {
+    case DumpType::File: {
       std::error_code EC;
       llvm::legacy::PassManager pass;
       llvm::buffer_ostream buff(dest);
@@ -966,7 +1109,7 @@ bool Compile(lang::Module &lang_mod, std::ostream &out, DumpType dump,
       dest.flush();
       break;
     }
-    case ASM: {
+    case DumpType::ASM: {
       llvm::legacy::PassManager pass;
       llvm::buffer_ostream buff(dest);
       if (TheTargetMachine->addPassesToEmitFile(pass, buff, nullptr,
@@ -978,7 +1121,7 @@ bool Compile(lang::Module &lang_mod, std::ostream &out, DumpType dump,
       dest.flush();
       break;
     }
-    case IR:
+    case DumpType::IR:
       mod.print(dest, nullptr);
       break;
   }

@@ -15,6 +15,8 @@ namespace lang {
 // management.
 class ASTBuilder {
  public:
+  ASTBuilder() : mutable_generic_(true), immutable_generic_(false) {}
+
   Str &getStr(const SourceLocation &start, std::string_view str) {
     return llvm::cast<Str>(
         *nodes_.emplace_back(new Str(start, str, getCharArrayType(str))));
@@ -126,19 +128,11 @@ class ASTBuilder {
     return getCallable(start, callable_ty, arg_starts, arg_names);
   }
 
-  // const None &getNone() {
-  //   return llvm::cast<None>(*nodes_.emplace_back(new None(getNoneType())));
-  // }
-
   Call &getCall(const SourceLocation &start, Expr &func,
                 const std::vector<Expr *> &args, bool pure = true) {
     const auto &callable_ty = llvm::cast<CallableType>(func.getType());
     const auto &ret_ty = callable_ty.getReturnType();
-    assert(callable_ty.ArgumentTypesMatch(args));
-    for (size_t i = 0; i < callable_ty.getNumArgs(); ++i) {
-      assert(callable_ty.getArgType(i).isGeneric() ||
-             callable_ty.getArgType(i) == args.at(i)->getType());
-    }
+    assert(callable_ty.CanApplyArgs(args));
     return llvm::cast<Call>(
         *nodes_.emplace_back(new Call(start, ret_ty, func, args, pure)));
   }
@@ -148,7 +142,7 @@ class ASTBuilder {
                                   const std::vector<Expr *> &args) {
     assert(AmbiguousCall::CanMake(funcs));
     assert(std::all_of(funcs.begin(), funcs.end(), [&](const Expr *e) {
-      return llvm::cast<CallableType>(e->getType()).ArgumentTypesMatch(args);
+      return llvm::cast<CallableType>(e->getType()).CanApplyArgs(args);
     }));
     assert(std::all_of(funcs.begin(), funcs.end(), [&funcs](const Expr *e) {
       return e->getType().getReturnType() ==
@@ -161,9 +155,9 @@ class ASTBuilder {
   Composite &getComposite(const SourceLocation &start,
                           const std::vector<Expr *> &elems) {
     std::vector<const Type *> types;
-    for (const Expr *elem : elems) {
+    types.reserve(elems.size());
+    for (const Expr *elem : elems)
       types.push_back(&elem->getType());
-    }
     return llvm::cast<Composite>(*nodes_.emplace_back(
         new Composite(start, getCompositeType(types), elems)));
   }
@@ -214,18 +208,21 @@ class ASTBuilder {
         *types_.emplace_back(new CallableType(ret_type, arg_types)));
   }
 
-  const ArrayType &getArrayType(const Type &type, size_t num) {
+  const ArrayType &getArrayType(const Type &type, size_t num,
+                                bool mut = false) {
     return llvm::cast<ArrayType>(
-        *types_.emplace_back(new ArrayType(type, num)));
+        *types_.emplace_back(new ArrayType(type, num, mut)));
   }
 
-  const CompositeType &getCompositeType(
-      const std::vector<const Type *> &types) {
+  const CompositeType &getCompositeType(const std::vector<const Type *> &types,
+                                        bool mut = false) {
     return llvm::cast<CompositeType>(
-        *types_.emplace_back(new CompositeType(types)));
+        *types_.emplace_back(new CompositeType(types, mut)));
   }
 
-  const GenericType &getGenericType() { return generic_; }
+  const GenericType &getGenericType(bool mut = false) {
+    return mut ? mutable_generic_ : immutable_generic_;
+  }
   const GenericRemainingType &getGenericRemainingType() {
     return generic_remaining_;
   }
@@ -234,7 +231,8 @@ class ASTBuilder {
   std::vector<std::unique_ptr<Node>> nodes_;
   std::vector<std::unique_ptr<const Type>> types_;
   std::map<std::string, const NamedType *, std::less<>> named_types_;
-  GenericType generic_;
+  GenericType mutable_generic_;
+  GenericType immutable_generic_;
   GenericRemainingType generic_remaining_;
 };
 

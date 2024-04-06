@@ -1,8 +1,8 @@
 #include <gtest/gtest.h>
-#include <stdio.h>
-#include <stdlib.h>
 #include <sys/wait.h>
 
+#include <cstdio>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
@@ -70,13 +70,15 @@ void BuildAndCheckOutput(lang::Module &mod, std::string_view expected,
   TmpFile obj_file;
   lang::ASTBuilder builder;
   lang::Lower(mod, builder);
-  ASSERT_TRUE(lang::Compile(mod, obj_file.getPath(), lang::File));
+  ASSERT_TRUE(lang::Compile(
+      mod, obj_file.getPath(), lang::DumpType::File, /*source=*/"",
+      /*optlvl=*/llvm::OptimizationLevel::O0, ADDRESS_SANITIZE_TESTS));
 
-  std::string cmd(
-      lang::Join(COMPILER_PATH " ", obj_file.getPath(), " -o ", kOut));
-  ASSERT_EQ(RunCommand(cmd), 0);
+  std::string cmd(lang::Concat(COMPILER_PATH " " COMPILER_LINK_FLAGS " ",
+                               obj_file.getPath(), " -o ", kOut));
+  ASSERT_EQ(RunCommand(cmd), 0) << cmd;
 
-  std::string out, cmd2(lang::Join("./", kOut));
+  std::string out, cmd2(lang::Concat("./", kOut));
   ASSERT_EQ(RunCommand(cmd2, &out, /*err=*/nullptr, in_text), 0);
   ASSERT_EQ(out, expected) << cmd;
 }
@@ -117,12 +119,16 @@ class LangCompilerE2E : public testing::Test {
     // use the second stage to create this, so let's delete it first.
     std::filesystem::remove("obj.obj");
 
-    ASSERT_EQ(RunCommand(LANG_EXE " " EXAMPLES_DIR "/compiler.lang"), 0);
-    ASSERT_EQ(RunCommand(lang::Join(COMPILER_PATH
-                                    " " EXAMPLES_DIR
-                                    "/compiler.lang.obj $(" LLVM_CONFIG " "
-                                    "--ldflags --system-libs --libs core) -o ",
-                                    kLangCompilerName)),
+    std::string cmd(LANG_EXE " " EXAMPLES_DIR "/compiler.lang");
+#if ADDRESS_SANITIZE_TESTS
+    cmd += " --sanitize-address";
+#endif
+    ASSERT_EQ(RunCommand(cmd), 0);
+    ASSERT_EQ(RunCommand(lang::Concat(
+                  COMPILER_PATH " " COMPILER_LINK_FLAGS " " EXAMPLES_DIR
+                                "/compiler.lang.obj $(" LLVM_CONFIG " "
+                                "--ldflags --system-libs --libs core) -o ",
+                  kLangCompilerName)),
               0);
   }
 };
@@ -135,8 +141,10 @@ TEST_F(LangCompilerE2E, HelloWorld) {
   std::string in(buffer.str());
 
   // This creates an object file called obj.obj.
-  ASSERT_EQ(
-      RunCommand(kLangCompilerName, /*out=*/nullptr, /*err=*/nullptr, &in), 0);
+  // Disable LSan here because there's a couple of leaks in LLVM internals.
+  std::string cmd("ASAN_OPTIONS=detect_leaks=0 ");
+  cmd += kLangCompilerName;
+  ASSERT_EQ(RunCommand(cmd, /*out=*/nullptr, /*err=*/nullptr, &in), 0) << cmd;
   ASSERT_EQ(RunCommand(COMPILER_PATH " obj.obj -o hello-world.out"), 0);
   std::string out;
 
@@ -207,6 +215,15 @@ TEST(E2E, Buffer) {
   constexpr char kExpected[] =
       "abc\n"
       "xyz\n"
+      "123\n";
+  BuildAndCheckOutput(input, kExpected);
+}
+
+TEST(E2E, Buffer2) {
+  std::ifstream input(EXAMPLES_DIR "/buffer2.lang");
+  constexpr char kExpected[] =
+      "abc\n"
+      "\n"
       "123\n";
   BuildAndCheckOutput(input, kExpected);
 }
@@ -313,7 +330,10 @@ TEST(RegressionTests, Regression1) {
   lang::Module &mod = **maybe_mod;
   lang::ASTBuilder builder;
   lang::Lower(mod, builder);
-  ASSERT_TRUE(lang::Compile(mod, obj_file.getPath(), lang::File));
+  ASSERT_TRUE(lang::Compile(mod, obj_file.getPath(), lang::DumpType::File,
+                            /*source=*/"",
+                            /*optlvl=*/llvm::OptimizationLevel::O0,
+                            ADDRESS_SANITIZE_TESTS));
 }
 
 TEST(E2E, TypeDeduction) {

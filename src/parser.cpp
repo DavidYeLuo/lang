@@ -36,7 +36,8 @@ Result<Module *> Parser::Parse() {
         return getErrorDiag()
                << next->getStart() << ": Unknown top level entity `"
                << next->getChars() << "`; "
-               << "expected either `def` or `decl`";
+               << "expected either `def` or `decl`"
+               << DumpLine{next->getStart()};
     }();
 
     if (!top_level_entity)
@@ -168,7 +169,8 @@ Result<Declare *> Parser::ParseDeclareImpl() {
   if (!tok->isa(Token::TK_Identifier))
     return getErrorDiag() << tok->getStart()
                           << ": Expected an identifier; instead found `"
-                          << tok->getChars() << "`";
+                          << tok->getChars() << "`"
+                          << DumpLine{tok->getStart()};
 
   std::string name(tok->getChars());
 
@@ -179,7 +181,8 @@ Result<Declare *> Parser::ParseDeclareImpl() {
   if (tok->getKind() != Token::TK_Assign)
     return getErrorDiag() << tok->getStart()
                           << ": Expected `=`; instead found `"
-                          << tok->getChars() << "`";
+                          << tok->getChars() << "`"
+                          << DumpLine{tok->getStart()};
 
   Result<const Type *> type = ParseType();
   if (!type)
@@ -218,7 +221,7 @@ Result<Callable *> Parser::ParseCallableHead() {
     if (res->getKind() != Token::TK_Identifier)
       return getErrorDiag()
              << res->getStart() << "Expected an argument name; instead found `"
-             << res->getChars() << "`";
+             << res->getChars() << "`" << DumpLine{res->getStart()};
 
     std::string_view name(res->getChars());
 
@@ -263,10 +266,10 @@ Result<Callable *> Parser::ParseCallableBody(Callable &callable) {
     return getErrorDiag()
            << callable.getStart()
            << ": Mismatch between callable return type and body return type; "
-              "expected "
+              "expected `"
            << callable.getType().getReturnType().toString()
-           << " but instead found " << callable.getBody().getType().toString()
-           << DumpLine{callable.getStart()};
+           << "` but instead found `" << callable.getBody().getType().toString()
+           << "`" << DumpLine{callable.getStart()};
   }
 
   return &callable;
@@ -281,25 +284,33 @@ Result<Callable *> Parser::ParseCallable() {
   return ParseCallableBody(**callable_head);
 }
 
-// <type>         ::= <namedtype> | <callabletype> | <compositetype>
+// <type> ::= ( "mut" )? (<namedtype> | <callabletype> | <compositetype> |
+//                        <arraytype> | <generictype> | <genericremainingtype>)
 //   <namedtype>              ::= <identifier>
 //   <callabletype>           ::= "\" <type>* "->" <type>
 //   <compositetype>          ::= "<" <type>+ ">"
 //   <arraytype>              ::= "[" \d+ "x" <type> "]"
 //   <generictype>            ::= "GENERIC"
 //   <genericremainingtype>   ::= "GENERIC_REMAINING"
-Result<const Type *> Parser::ParseType(bool parse_callable_names) {
+Result<const Type *> Parser::ParseType() {
   Result<Token> res = lexer_.Lex();
   if (!res)
     return res;
+
+  bool mut = res->isa(Token::TK_Mut);
+  if (mut) {
+    res = lexer_.Lex();
+    if (!res)
+      return res;
+  }
 
   if (res->isa(Token::TK_Identifier)) {
     std::string_view type_name(res->getChars());
 
     // TODO: Check custom types here eventually.
     if (!IsBuiltinType(type_name)) {
-      return getErrorDiag()
-             << res->getStart() << "Unknown builtin type `" << type_name << "`";
+      return getErrorDiag() << res->getStart() << "Unknown builtin type `"
+                            << type_name << "`" << DumpLine{res->getStart()};
     }
 
     return &builder_.getNamedType(type_name);
@@ -310,15 +321,10 @@ Result<const Type *> Parser::ParseType(bool parse_callable_names) {
 
     std::vector<const Type *> arg_types;
     while (!res->isa(Token::TK_Arrow)) {
-      Result<const Type *> arg_type = ParseType(parse_callable_names);
+      Result<const Type *> arg_type = ParseType();
       if (!arg_type)
         return arg_type;
       arg_types.push_back(arg_type.get());
-
-      if (parse_callable_names) {
-        // Such as in a definition.
-        Consume(Token::TK_Identifier);
-      }
 
       res = lexer_.Peek();
       if (!res)
@@ -326,7 +332,7 @@ Result<const Type *> Parser::ParseType(bool parse_callable_names) {
     }
 
     Consume(Token::TK_Arrow);
-    Result<const Type *> res_type = ParseType(parse_callable_names);
+    Result<const Type *> res_type = ParseType();
     if (!res_type)
       return res_type;
 
@@ -334,7 +340,7 @@ Result<const Type *> Parser::ParseType(bool parse_callable_names) {
   } else if (res->isa(Token::TK_LAngleBrack)) {
     std::vector<const Type *> types;
     do {
-      Result<const Type *> type = ParseType(parse_callable_names);
+      Result<const Type *> type = ParseType();
       if (!type)
         return type;
 
@@ -345,7 +351,7 @@ Result<const Type *> Parser::ParseType(bool parse_callable_names) {
         return res;
     } while (!res->isa(Token::TK_RAngleBrack));
     Consume(Token::TK_RAngleBrack);
-    return &builder_.getCompositeType(types);
+    return &builder_.getCompositeType(types, mut);
   } else if (res->isa(Token::TK_LSqBrack)) {
     auto loc = lexer_.getCurrentLoc();
     Result<Int *> num = ParseInt();
@@ -355,7 +361,7 @@ Result<const Type *> Parser::ParseType(bool parse_callable_names) {
     if ((*num)->getInt() <= 0) {
       return getErrorDiag()
              << loc << ": Expected a positive integral size; instead found `"
-             << (*num)->getInt() << "`";
+             << (*num)->getInt() << "`" << DumpLine{loc};
     }
 
     res = lexer_.Lex();
@@ -364,10 +370,10 @@ Result<const Type *> Parser::ParseType(bool parse_callable_names) {
     if (!res->isa(Token::TK_Identifier) || res->getChars() != "x") {
       return getErrorDiag()
              << loc << ": Expected `x` in array type; instead found `"
-             << res->getChars() << "`";
+             << res->getChars() << "`" << DumpLine{loc};
     }
 
-    Result<const Type *> type = ParseType(parse_callable_names);
+    Result<const Type *> type = ParseType();
     if (!type)
       return type;
 
@@ -377,12 +383,12 @@ Result<const Type *> Parser::ParseType(bool parse_callable_names) {
     if (!res->isa(Token::TK_RSqBrack))
       return getErrorDiag()
              << loc << ": Expected closing `]` for array type; instead found `"
-             << res->getChars() << "`";
+             << res->getChars() << "`" << DumpLine{loc};
 
-    return &builder_.getArrayType(**type,
-                                  static_cast<size_t>((*num)->getInt()));
+    return &builder_.getArrayType(**type, static_cast<size_t>((*num)->getInt()),
+                                  mut);
   } else if (res->isa(Token::TK_GENERIC)) {
-    return &builder_.getGenericType();
+    return &builder_.getGenericType(mut);
   } else if (res->isa(Token::TK_GENERIC_REMAINING)) {
     return &builder_.getGenericRemainingType();
   }
@@ -418,20 +424,10 @@ Result<Expr *> Parser::ParseExpr(const Type *hint) {
     }
   }
 
-  if (hint && !hint->isGeneric() && !expr->getType().isGeneric()) {
-    if (expr->getType().isGenericCallable() && llvm::isa<CallableType>(hint)) {
-      if (!llvm::cast<CallableType>(expr->getType())
-               .CallableTypesMatch(llvm::cast<CallableType>(*hint))) {
-        return getErrorDiag()
-               << loc << ": Expression type mismatch; found `"
-               << expr->getType().toString() << "` but expected `"
-               << hint->toString() << "`" << DumpLine{loc};
-      }
-    } else if (*hint != expr->getType()) {
-      return getErrorDiag() << loc << ": Expression type mismatch; found `"
-                            << expr->getType().toString() << "` but expected `"
-                            << hint->toString() << "`" << DumpLine{loc};
-    }
+  if (hint && !hint->isGeneric() && !hint->CanConvertFrom(*expr)) {
+    return getErrorDiag() << loc << ": Expression type mismatch; found `"
+                          << expr->getType().toString() << "` but expected `"
+                          << hint->toString() << "`" << DumpLine{loc};
   }
 
   return expr;
@@ -469,7 +465,6 @@ Result<Expr *> Parser::ParseExprImpl(const Type *hint) {
     return ParseGet();
   if (res->getKind() == Token::TK_SET)
     return ParseSet();
-  // if (res->getKind() == Token::TK_None) return ParseNone();
   if (res->getKind() == Token::TK_LAngleBrack)
     return ParseComposite();
   if (res->getKind() == Token::TK_Lambda)
@@ -492,11 +487,6 @@ Result<Expr *> Parser::ParseExprImpl(const Type *hint) {
                         << ": Unable to parse expression starting with `"
                         << res->getChars() << "`" << DumpLine{expr_loc};
 }
-
-// Result<const None *> Parser::ParseNone() {
-//   Consume(Token::TK_None);
-//   return &builder_.getNone();
-// }
 
 Result<BinOp *> Parser::ParseBinOp(const Type *hint) {
   Result<Token> res = lexer_.Lex();
@@ -534,13 +524,15 @@ Result<BinOp *> Parser::ParseBinOp(const Type *hint) {
            << res->getStart()
            << ": Operands of binary operator have differing types; "
            << (*lhs)->getType().toString() << " and "
-           << (*rhs)->getType().toString();
+           << (*rhs)->getType().toString() << DumpLine{res->getStart()};
   }
 
   return &builder_.getBinOp(*lhs.get(), *rhs.get(), kind);
 }
 
+//
 // <if> ::= "if" <expr> <expr> "else" <expr>
+//
 Result<If *> Parser::ParseIf(const Type *hint) {
   Result<Token> if_tok = lexer_.Lex();
   assert(if_tok->isa(Token::TK_If));
@@ -559,11 +551,12 @@ Result<If *> Parser::ParseIf(const Type *hint) {
            << cond_expr_tok->getStart()
            << ": Expected `bool` type for if condition expression; instead "
               "found `"
-           << type.toString() << "`";
+           << type.toString() << "`" << DumpLine{cond_expr_tok->getStart()};
 
   Result<Expr *> if_body = ParseExpr(hint);
   if (!if_body)
     return if_body;
+  const Type &if_type = (*if_body)->getType();
 
   Result<Token> res = lexer_.Lex();
   if (!res)
@@ -572,42 +565,59 @@ Result<If *> Parser::ParseIf(const Type *hint) {
     return getErrorDiag() << res->getStart()
                           << ": Expected `else` for if starting at "
                           << if_tok->getStart() << "; instead found `"
-                          << res->getChars() << "`";
+                          << res->getChars() << "`"
+                          << DumpLine{res->getStart()};
 
   Result<Expr *> else_body = ParseExpr(hint);
   if (!else_body)
     return else_body;
+  const Type &else_type = (*else_body)->getType();
 
-  if ((*if_body)->getType() != (*else_body)->getType()) {
+  // Ignore becuase even if only one of the branches is immutable, then the
+  // return type can be immutable. Additionally, if the return type of whatever
+  // function this is in is immutable, then we'll check against that.
+  if (!if_type.Equals(else_type, Type::QualifierCmp::Ignore)) {
     return getErrorDiag()
            << if_tok->getStart()
            << ": Mismatch type between if and else expressions; if expression "
               "has type "
-           << (*if_body)->getType().toString()
-           << " but else expression has type "
-           << (*else_body)->getType().toString();
+           << if_type.toString() << DumpLine{(**if_body).getStart()} << "\n"
+           << "but else expression has type " << else_type.toString()
+           << DumpLine{(**else_body).getStart()};
   }
 
   if (hint) {
-    if ((*if_body)->getType() != *hint) {
-      return getErrorDiag() << if_tok->getStart()
-                            << ": Mismatch type between if body and expected "
-                               "type; if body has "
-                               "type "
-                            << (*if_body)->getType().toString()
-                            << " but expected type " << hint->toString();
+    if (!hint->CanConvertFrom(if_type)) {
+      return getErrorDiag()
+             << if_tok->getStart()
+             << ": Mismatch type between if body and expected "
+                "type; if body has "
+                "type "
+             << if_type.toString() << " but expected type " << hint->toString();
     }
-    if ((*else_body)->getType() != *hint) {
+    if (!hint->CanConvertFrom(else_type)) {
       return getErrorDiag() << if_tok->getStart()
                             << ": Mismatch type between else body and expected "
                                "type; else body "
                                "has type "
-                            << (*else_body)->getType().toString()
-                            << " but expected type " << hint->toString();
+                            << else_type.toString() << " but expected type "
+                            << hint->toString();
     }
   }
 
-  return &builder_.getIf(if_loc, *cond.get(), *if_body.get(), *else_body.get());
+  // Get the immutable type if there is one.
+  //
+  // Note that if the common type is a composite or array (such as
+  // `<[128xchar]>` vs `<mut [128xchar]>`) then we can't just compare outer
+  // mutablity. So let's take the one that can't be converted to the other.
+  const Type &res_ty = [&if_type, &else_type]() -> const Type & {
+    // This check only fails if `else_type` has some nested immutability.
+    if (if_type.CanConvertFrom(else_type))
+      return if_type;
+    return else_type;
+  }();
+
+  return &builder_.getIf(if_loc, res_ty, *cond.get(), **if_body, **else_body);
 }
 
 //
@@ -628,12 +638,14 @@ Result<Keep *> Parser::ParseKeep(const Type *hint) {
   if (!res->isa(Token::TK_Identifier))
     return getErrorDiag() << res->getStart()
                           << ": Expected an identifier but instead found `"
-                          << res->getChars() << "`";
+                          << res->getChars() << "`"
+                          << DumpLine{res->getStart()};
 
   std::string_view name(res->getChars());
   if (HasVar(name)) {
     return getErrorDiag() << res->getStart() << ": Variable name `" << name
-                          << "` is already defined prior";
+                          << "` is already defined prior"
+                          << DumpLine{res->getStart()};
   }
 
   Consume(Token::TK_Assign);
@@ -662,15 +674,18 @@ Result<Expr *> Parser::ParseLet(const Type *hint) {
   if (!res)
     return res;
 
-  if (!res->isa(Token::TK_Identifier))
+  if (!res->isa(Token::TK_Identifier)) {
     return getErrorDiag() << res->getStart()
                           << ": Expected an identifier but instead found `"
-                          << res->getChars() << "`";
+                          << res->getChars() << "`"
+                          << DumpLine{res->getStart()};
+  }
 
   std::string_view name(res->getChars());
   if (HasVar(name)) {
     return getErrorDiag() << res->getStart() << ": Variable name `" << name
-                          << "` is already defined prior";
+                          << "` is already defined prior"
+                          << DumpLine{res->getStart()};
   }
 
   Consume(Token::TK_Assign);
@@ -744,34 +759,24 @@ Result<Expr *> Parser::ParseIdentifier(const Type *hint) {
   }
 
   // Handle a potential call.
-  const std::vector<const Type *> *maybe_args = nullptr;
-  if (const auto *callable_ty = llvm::dyn_cast_or_null<CallableType>(hint))
-    maybe_args = &callable_ty->getArgTypes();
-  auto possible_callables = getPossibleCallables(name, maybe_args);
-  if (possible_callables.size() > 1) {
-    if (lexer_.Peek()->isa(Token::TK_LParen)) {
-      // Handle the new call syntax.
-      Consume(Token::TK_LParen);
-      auto maybe_callable_and_args =
-          ParseCallableFromArgs(res->getStart(), name, Token::TK_RParen, hint);
-      if (!maybe_callable_and_args)
-        return maybe_callable_and_args;
-      Consume(Token::TK_RParen);
+  if (lexer_.Peek()->isa(Token::TK_LParen)) {
+    // Handle the new call syntax.
+    Consume(Token::TK_LParen);
+    auto maybe_callable_and_args =
+        ParseCallableFromArgs(res->getStart(), name, Token::TK_RParen, hint);
+    if (!maybe_callable_and_args)
+      return maybe_callable_and_args;
+    Consume(Token::TK_RParen);
 
-      auto &callables = maybe_callable_and_args->possible_callables;
-      auto &args = maybe_callable_and_args->args;
-      assert(!callables.empty());
-      if (callables.size() == 1) {
-        return getAndCheckCall(res->getStart(), *callables.front(), args,
-                               /*pure=*/false, hint);
-      } else {
-        return &builder_.getAmbiguousCall(res->getStart(), callables, args);
-      }
-    } else {
-      // Handle the old call syntax.
-      return getAmbiguousCallDiag(res->getStart(), name, possible_callables,
-                                  maybe_args);
+    auto &callables = maybe_callable_and_args->possible_callables;
+    auto &args = maybe_callable_and_args->args;
+    assert(!callables.empty());
+    if (callables.size() == 1) {
+      return getAndCheckCall(res->getStart(), *callables.front(), args,
+                             /*pure=*/false, hint);
     }
+
+    return &builder_.getAmbiguousCall(res->getStart(), callables, args);
   }
 
   return &LookupSingleExpr(name);
@@ -796,7 +801,7 @@ Result<const std::vector<Expr *>> Parser::ParseCallArguments(
              << ": Call exceeds expected number of arguments; expected "
              << callable_type->getNumArgs() << " args for callable type "
              << callable_type->toString() << " but instead found `"
-             << res->getChars() << "`";
+             << res->getChars() << "`" << DumpLine{current};
     }
 
     // Parse an expression as an argument.
@@ -817,7 +822,7 @@ Result<const std::vector<Expr *>> Parser::ParseCallArguments(
     std::vector<const Type *> arg_types(args.size());
     std::transform(args.begin(), args.end(), arg_types.begin(),
                    [](const Expr *e) { return &e->getType(); });
-    if (!callable_type->ArgumentTypesMatch(arg_types)) {
+    if (!callable_type->CanApplyArgs(arg_types)) {
       Diagnostic diag(getErrorDiag());
       diag << current << ": Cannot call function of type `"
            << callable_type->toString() << "` with arg types `";
@@ -885,7 +890,7 @@ Result<Expr *> Parser::ParseCall(const Type *return_type_hint) {
              << callable->getStart()
              << ": Expected callable expression to be a callable type; instead "
                 "found "
-             << type.toString();
+             << type.toString() << DumpLine{callable->getStart()};
     }
 
     auto args_res =
@@ -909,11 +914,13 @@ Result<Call *> Parser::getAndCheckCall(const SourceLocation &callable_loc,
   if (!actual_ty)
     return getExpectedCallableDiag(callable_loc, maybe_callable.getType());
 
-  if (return_type_hint && actual_ty->getReturnType() != *return_type_hint) {
+  if (return_type_hint &&
+      !return_type_hint->CanConvertFrom(actual_ty->getReturnType())) {
     return getErrorDiag() << callable_loc
                           << ": Return type mismatch for call; found "
                           << actual_ty->getReturnType().toString()
-                          << " but expected " << return_type_hint->toString();
+                          << " but expected " << return_type_hint->toString()
+                          << DumpLine{callable_loc};
   }
 
   if (actual_ty->getNumArgs() != args.size() &&
@@ -931,12 +938,12 @@ Result<Call *> Parser::getAndCheckCall(const SourceLocation &callable_loc,
   }
 
   for (size_t i = 0; i < actual_ty->getNumArgs(); ++i) {
-    if (!actual_ty->getArgType(i).isGeneric() &&
-        actual_ty->getArgType(i) != args.at(i)->getType()) {
+    if (!actual_ty->getArgType(i).CanConvertFrom(*args.at(i))) {
       return getErrorDiag()
-             << callable_loc << ": Type mismatch for argument " << i
-             << "; found " << args.at(i)->getType().toString()
-             << " but expected " << actual_ty->getArgType(i).toString();
+             << callable_loc << ": Cannot convert argument " << i
+             << " which is `" << args.at(i)->getType().toString()
+             << "` to parameter type `" << actual_ty->getArgType(i).toString()
+             << "`" << DumpLine{callable_loc};
     }
   }
 
@@ -1027,55 +1034,68 @@ Result<Composite *> Parser::ParseComposite() {
   return &builder_.getComposite(loc, elems);
 }
 
+//
 // <set> ::= "SET" <expr> <expr> <expr>
 //
 // The first <expr> is the composite type being accessed. The second <expr> is
 // the index. The third <expr> is the value being stored.
+//
 Result<Set *> Parser::ParseSet() {
   SourceLocation loc = lexer_.Peek()->getStart();
   Consume(Token::TK_SET);
 
-  auto peek = lexer_.Peek();
-  if (!peek)
-    return peek;
-  SourceLocation composite_loc = peek->getStart();
-  Result<Expr *> composite = ParseExpr();
-  if (!composite)
-    return composite;
+  Result<Expr *> composite_res = ParseExpr();
+  if (!composite_res)
+    return composite_res;
 
-  const Type &type = (*composite)->getType();
+  Expr &composite = **composite_res;
+
+  const Type &type = composite.getType();
   if (!type.isValidGetSetType()) {
-    return getErrorDiag() << composite_loc
+    return getErrorDiag() << composite.getStart()
                           << ": Expression is not a composite or array type"
-                          << DumpLine{composite_loc};
+                          << DumpLine{composite.getStart()};
   }
 
-  Result<Expr *> idx = ParseExpr();
-  if (!idx)
-    return idx;
-
-  peek = lexer_.Peek();
-  if (!peek)
-    return peek;
-  SourceLocation idx_loc = peek->getStart();
-  if (!(*idx)->getType().isNamedType("int")) {
+  if (!type.isMutable()) {
     return getErrorDiag()
-           << idx_loc
+           << loc << ": Attempting to SET type that is not marked as mutable"
+           << DumpLine{loc} << "\n"
+           << composite.getStart() << ": Expression to SET declared here"
+           << DumpLine{composite.getStart()};
+  }
+
+  Result<Expr *> idx_res = ParseExpr();
+  if (!idx_res)
+    return idx_res;
+
+  Expr &idx = **idx_res;
+
+  if (!idx.getType().isNamedType("int")) {
+    return getErrorDiag()
+           << idx.getStart()
            << ": Expression for index is not type `int`; instead is `"
-           << (*idx)->getType().toString() << "`";
+           << idx.getType().toString() << "`" << DumpLine{idx.getStart()};
   }
 
   Result<Expr *> store_val = ParseExpr();
   if (!store_val)
     return store_val;
 
-  return &builder_.getSet(loc, **composite, **idx, **store_val);
+  // TODO: If the idx is a constant integer we can determine now, let's maybe
+  // check that the corresponding type at the idx matches the type of the store
+  // value.
+
+  Set &set = builder_.getSet(loc, composite, idx, **store_val);
+  return &set;
 }
 
+//
 // <get> ::= "GET" <type> <expr> <expr>
 //
 // The <type> is the resulting type of the GET expression. The first <expr> is
 // the composite type that is being accessed. The second <expr> is the index.
+//
 Result<Get *> Parser::ParseGet() {
   SourceLocation loc = lexer_.Peek()->getStart();
   Consume(Token::TK_GET);
@@ -1126,13 +1146,16 @@ Result<Get *> Parser::ParseGet() {
       }
       result_type = &arr_ty->getElemType();
     } else {
-      __builtin_trap();
+      UNREACHABLE(
+          "We should've checked if this was either a composite or array type "
+          "above.");
     }
 
-    if (type != *result_type) {
+    if (!type.CanConvertFrom(*result_type)) {
       return getErrorDiag()
              << typeloc << ": GET type mismatch; expected `" << type.toString()
-             << "` but found `" << result_type->toString() << "`";
+             << "` but found `" << result_type->toString() << "`"
+             << DumpLine{typeloc};
     }
   }
 

@@ -59,6 +59,9 @@ Useful cmake flags:
   - Useful for local rebuilds.
 - **-DCMAKE_EXPORT_COMPILE_COMMANDS=ON**
   - Build `compile_commands.json`.
+- **-DADDRESS_SANITIZE_TESTS=1**
+  - Build end-to-end tests with ASan. This will cause tests to run a little slower.
+    The sanitized clang builder sets this.
 
 ## Test
 
@@ -83,5 +86,5 @@ The github actions builder uses this configuration:
 cmake .. -GNinja -DCMAKE_C_COMPILER=clang-16 -DCMAKE_CXX_COMPILER=clang++-16 \
   -DLLVM_CONFIG=llvm-config-16 -DCLANG_FORMAT=clang-format-16 \
   -DCMAKE_CXX_FLAGS="-fsanitize=address -fsanitize=undefined -ftrivial-auto-var-init=pattern" \
-  -DCMAKE_EXE_LINKER_FLAGS="-fuse-ld=lld"
+  -DCMAKE_EXE_LINKER_FLAGS="-fuse-ld=lld" -DADDRESS_SANITIZE_TESTS=1
 ```

@@ -68,9 +68,9 @@ TEST(ArgParse, PosArgDefaultType) {
 
   argparse::ArgParser parser(kArgc, kArgv);
   parser.AddPosArg("arg1");
-  auto res = *parser.get("arg1");
-  static_assert(std::is_same_v<decltype(res), const char *>);
-  ASSERT_STREQ(*parser.get("arg1"), "pos1");
+  auto arg1 = *parser.get("arg1");
+  static_assert(std::is_same_v<decltype(arg1), const char *>);
+  ASSERT_STREQ(arg1, "pos1");
 }
 
 TEST(ArgParse, SimpleOptArg) {

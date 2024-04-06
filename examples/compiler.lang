@@ -103,8 +103,8 @@ def skip_ws = \IO io int old_row int old_col -> <IO int int int>
 # - The last read character
 # - The row of the last read character
 # - The col of the last read character
-def __read_token_remaining = \IO io [128 x char] buff int idx int old_row int old_col ->
-                              <[128 x char] IO int int int>
+def __read_token_remaining = \IO io mut [128 x char] buff int idx int old_row int old_col ->
+                              <mut [128 x char] IO int int int>
   let res = call readc_row_col io old_row old_col end
   let io2 = GET IO res 0
   let c = GET int res 1
@@ -134,8 +134,8 @@ def __read_token_remaining = \IO io [128 x char] buff int idx int old_row int ol
 # - The last read character
 # - The row of the last read character
 # - The col of the last read character
-def __read_string_token_impl = \IO io [128 x char] buff int idx int old_row int old_col ->
-                                <[128 x char] IO int int int>
+def __read_string_token_impl = \IO io mut [128 x char] buff int idx int old_row int old_col ->
+                                <mut [128 x char] IO int int int>
   let next = call readc_row_col io old_row old_col end
   let next_IO = GET IO next 0
   let next_c = GET int next 1
@@ -203,8 +203,8 @@ def __read_string_token_impl = \IO io [128 x char] buff int idx int old_row int 
 # - The last read character
 # - The row of the last read character
 # - The col of the last read character
-def __read_string_token = \IO io int old_row int old_col -> <[128 x char] IO int int int>
-  let buff = zero as [128 x char]
+def __read_string_token = \IO io int old_row int old_col -> <mut [128 x char] IO int int int>
+  let buff = zero as mut [128 x char]
   call __read_string_token_impl io buff 0 old_row old_col end
 
 # Arguments:
@@ -263,7 +263,7 @@ def read_token = \IO io int old_row int old_col -> <[128 x char] IO int int int>
       end
   else
 
-  let buff = zero as [128 x char]
+  let buff = zero as mut [128 x char]
 
   let res =
     if LT last_c 0

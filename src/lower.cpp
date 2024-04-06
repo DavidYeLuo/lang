@@ -68,9 +68,9 @@ class ASTLowerer : public NonConstASTVisitor<> {
   void Visit(Call &call) {
     const CallableType &callable_ty =
         llvm::cast<CallableType>(call.getFunc().getType());
-    auto arg_types = call.getArgTypes();
 
     if (callable_ty.isGeneric()) {
+      auto arg_types = call.getArgTypes();
       assert(std::none_of(arg_types.begin(), arg_types.end(),
                           [](const Type *t) { return t->isGeneric(); }));
       Declare &decl = ExtractDeclare(call.getFunc());

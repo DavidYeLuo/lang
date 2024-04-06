@@ -5,14 +5,19 @@
 #include "astdumper.h"
 #include "compiler.h"
 #include "lexer.h"
+#include "llvm/Passes/OptimizationLevel.h"
 #include "parser.h"
 
 int main(int argc, char **argv) {
   argparse::ArgParser argparser(argc, argv);
   argparser.AddPosArg("file");
+  // TODO: Consolidate these emit flags.
   argparser.AddOptArg<bool>("emit-llvm").setStoreTrue();
+  argparser.AddOptArg<bool>("emit-asm").setStoreTrue();
   argparser.AddOptArg<bool>("dump-ast").setStoreTrue();
   argparser.AddOptArg<bool>("dump-ast-lower").setStoreTrue();
+  argparser.AddOptArg<bool>("opt").setStoreTrue();
+  argparser.AddOptArg<bool>("sanitize-address").setStoreTrue();
   argparser.AddOptArg("output", 'o');
 
   auto f = argparser.get("file");
@@ -51,19 +56,29 @@ int main(int argc, char **argv) {
     return 0;
   }
 
-  auto mode = lang::File;
+  auto mode = lang::DumpType::File;
   if (*argparser.get<bool>("emit-llvm"))
-    mode = lang::IR;
+    mode = lang::DumpType::IR;
+  else if (*argparser.get<bool>("emit-asm"))
+    mode = lang::DumpType::ASM;
+
+  auto optlvl = *argparser.get<bool>("opt") ? llvm::OptimizationLevel::O3
+                                            : llvm::OptimizationLevel::O0;
 
   std::string outname;
   if (auto output = argparser.get("output")) {
-    if (std::string_view(*output) == "-") {
-      return Compile(mod, std::cout, mode, /*modname=*/"", *f) ? 0 : 1;
-    }
+    if (std::string_view(*output) == "-")
+      return Compile(mod, std::cout, mode, /*modname=*/"", *f, optlvl,
+                     *argparser.get<bool>("sanitize-address"))
+                 ? 0
+                 : 1;
 
     outname.append(*output);
   } else {
     outname.append(*f).append(".obj");
   }
-  return Compile(mod, outname, mode, *f) ? 0 : 1;
+  return Compile(mod, outname, mode, *f, optlvl,
+                 *argparser.get<bool>("sanitize-address"))
+             ? 0
+             : 1;
 }

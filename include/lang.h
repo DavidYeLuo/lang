@@ -160,21 +160,39 @@ class Result {
 };
 
 template <typename Arg>
-void Join(std::stringstream &ss, const Arg &arg) {
+void Concat(std::stringstream &ss, const Arg &arg) {
   ss << arg;
 }
 
 template <typename Arg, typename... Args>
-void Join(std::stringstream &ss, const Arg &arg, const Args &...args) {
+void Concat(std::stringstream &ss, const Arg &arg, const Args &...args) {
   ss << arg;
-  Join(ss, args...);
+  Concat(ss, args...);
 }
 
 template <typename... Args>
-std::string Join(const Args &...args) {
+std::string Concat(const Args &...args) {
   std::stringstream ss;
-  Join(ss, args...);
+  Concat(ss, args...);
   return ss.str();
+}
+
+template <typename IterT, typename UnaryOp>
+std::string Join(const IterT &iterable, std::string_view glue, UnaryOp op) {
+  if (iterable.empty())
+    return "";
+  std::stringstream ss;
+  ss << op(iterable.front());
+  // for (typename IterT::const_reference elem : iterable.subspan(1))
+  for (auto it = std::begin(iterable) + 1; it != iterable.end(); ++it)
+    ss << glue << op(*it);
+  return ss.str();
+}
+
+template <typename IterT>
+std::string Join(const IterT &iterable, std::string_view glue) {
+  return Join(iterable, glue,
+              [](typename IterT::const_reference elem) { return elem; });
 }
 
 }  // namespace lang

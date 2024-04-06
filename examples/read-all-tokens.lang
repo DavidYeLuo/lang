@@ -22,7 +22,7 @@ def any = \bool a -> bool
 def any = \bool a GENERIC_REMAINING remaining -> bool
   OR a any(remaining)
 
-def __read_token_remaining = \IO io [128 x char] buff int idx -> <[128 x char] IO int>
+def __read_token_remaining = \IO io mut [128 x char] buff int idx -> <mut [128 x char] IO int>
   let res = call readc io end
   let io2 = GET IO res 0
   let c = GET int res 1
@@ -35,7 +35,7 @@ def __read_token_remaining = \IO io [128 x char] buff int idx -> <[128 x char] I
     let newbuff = SET buff idx CAST char c
     call __read_token_remaining io2 newbuff ADD idx 1 end
 
-def __read_string_token_impl = \IO io [128 x char] buff int idx -> <[128 x char] IO int>
+def __read_string_token_impl = \IO io mut [128 x char] buff int idx -> <mut [128 x char] IO int>
   let next = call readc io end
   let next_IO = GET IO next 0
   let next_c = GET int next 1
@@ -55,8 +55,8 @@ def __read_string_token_impl = \IO io [128 x char] buff int idx -> <[128 x char]
     ADD idx 1
     end
 
-def __read_string_token = \IO io -> <[128 x char] IO int>
-  let buff = zero as [128 x char]
+def __read_string_token = \IO io -> <mut [128 x char] IO int>
+  let buff = zero as mut [128 x char]
   let buff2 = SET buff 0 '"'
   call __read_string_token_impl io buff2 1 end
 
@@ -64,11 +64,11 @@ def __read_string_token = \IO io -> <[128 x char] IO int>
 #   - buffer of the original chars
 #   - IO
 #   - The last char read
-def read_token = \IO io int idx -> <[128 x char] IO int>
+def read_token = \IO io int idx -> <mut [128 x char] IO int>
   let skipped = call skip_ws io end
   let skipped_IO = GET IO skipped 0
   let last_c = GET int skipped 1
-  let buff = zero as [128 x char]
+  let buff = zero as mut [128 x char]
   if LT last_c 0
     <buff skipped_IO last_c>
   else

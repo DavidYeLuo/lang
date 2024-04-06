@@ -15,14 +15,14 @@ TEST(Parser, GenericRemainingArgumentTypesMatch) {
       builder.getIOType(), {&builder.getIOType(), &builder.getGenericType()});
   std::vector<const lang::Type *> args{&builder.getIOType(),
                                        &builder.getGenericRemainingType()};
-  ASSERT_TRUE(callable_ty.ArgumentTypesMatch(args));
+  ASSERT_TRUE(callable_ty.CanApplyArgs(args));
 
   // This should also match because we don't know at parse time if the remaining
   // args can fit enough for this callable until we lower it.
   const auto &callable_ty2 = builder.getCallableType(
       builder.getIOType(), {&builder.getIOType(), &builder.getGenericType(),
                             &builder.getGenericRemainingType()});
-  ASSERT_TRUE(callable_ty2.ArgumentTypesMatch(args));
+  ASSERT_TRUE(callable_ty2.CanApplyArgs(args));
 }
 
 TEST(Errors, ReturnTypeMismatch) {

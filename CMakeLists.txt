@@ -12,7 +12,7 @@ message(STATUS "CLANG_FORMAT: ${CLANG_FORMAT}")
 # These will always come after -DCMAKE_C/CXX_FLAGS.
 add_compile_options(
     # Always have warnings as errors.
-    -Wall -Werror
+    -Wall -Werror -Wconversion -Wno-sign-conversion
 
     # Always use c++20.
     -std=c++20

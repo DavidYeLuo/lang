@@ -8,7 +8,7 @@ def any = \bool a -> bool
 def any = \bool a GENERIC_REMAINING remaining -> bool
   OR a any(remaining)
 
-def read_token = \IO io [128 x char] buff int idx -> <[128 x char] IO>
+def read_token = \IO io mut [128 x char] buff int idx -> <[128 x char] IO>
   let res = call readc io end
   let io2 = GET IO res 0
   let c = GET int res 1
@@ -22,7 +22,7 @@ def read_token = \IO io [128 x char] buff int idx -> <[128 x char] IO>
     call read_token io2 newbuff ADD idx 1 end
 
 def main = \IO io -> IO
-  let res = call read_token io zero as [128 x char] 0 end
+  let res = call read_token io zero as mut [128 x char] 0 end
   call writeln_str
     GET IO res 1
     GET [128 x char] res 0
