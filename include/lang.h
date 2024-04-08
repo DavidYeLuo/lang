@@ -183,7 +183,6 @@ std::string Join(const IterT &iterable, std::string_view glue, UnaryOp op) {
     return "";
   std::stringstream ss;
   ss << op(iterable.front());
-  // for (typename IterT::const_reference elem : iterable.subspan(1))
   for (auto it = std::begin(iterable) + 1; it != iterable.end(); ++it)
     ss << glue << op(*it);
   return ss.str();
