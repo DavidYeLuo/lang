@@ -74,7 +74,13 @@ class Type {
 
   Kind getKind() const { return kind_; }
 
-  virtual std::string toString() const = 0;
+  std::string toString() const {
+    std::string s;
+    if (isMutable())
+      s += "mut ";
+    s += toStringImpl();
+    return s;
+  }
 
   bool isNamedType(std::string_view name) const;
   bool isBuiltinType() const;
@@ -87,18 +93,37 @@ class Type {
   bool isGenericCallable() const;
   bool isGenericRemainingCallable() const;
 
-  bool operator==(const Type &other) const { return Equals(other); }
+  enum class QualifierCmp {
+    // Mutability must match exactly.
+    Exact,
 
-  // bool isNoneType() const {
-  //   return isNamedType("none");
-  // }
+    // Ignore mutability when comparing.
+    Ignore,
+
+    // If the LHS is mutable, then the RHS must not be immutable because we'd
+    // lose const-ness.
+    RetainImmutability,
+  };
+
+  // Determins if this type can be mutated. Mainly the composite types use this.
+  virtual bool isMutable() const { return false; }
+  bool isImmutable() const { return !isMutable(); }
+  bool CheckQualifiers(const Type &rhs, QualifierCmp cmp) const;
+
+  bool operator==(const Type &other) const {
+    return Equals(other, QualifierCmp::Exact);
+  }
+  virtual bool Equals(const Type &, QualifierCmp cmp) const = 0;
+
+  bool CanConvertFrom(const Expr &e) const;
+  bool CanConvertFrom(const Type &t) const;
 
   const Type &getReturnType() const;
   bool Matches(const Type &other) const;
   bool isValidGetSetType() const;
 
  protected:
-  virtual bool Equals(const Type &) const = 0;
+  virtual std::string toStringImpl() const = 0;
 
  private:
   const Kind kind_;
@@ -106,45 +131,49 @@ class Type {
 
 class GenericType : public Type {
  public:
-  GenericType() : Type(TK_GenericType) {}
-  std::string toString() const override { return "GENERIC"; }
+  GenericType(bool mut = false) : Type(TK_GenericType), mutable_(mut) {}
   bool isGeneric() const override { return true; }
+  bool isMutable() const override { return mutable_; }
 
   static bool classof(const Type *type) {
     return type->getKind() == TK_GenericType;
   }
+  bool Equals(const Type &other, QualifierCmp) const override;
 
  protected:
-  bool Equals(const Type &other) const override;
+  std::string toStringImpl() const override { return "GENERIC"; }
+
+ private:
+  bool mutable_;
 };
 
 class GenericRemainingType : public Type {
  public:
   GenericRemainingType() : Type(TK_GenericRemainingType) {}
-  std::string toString() const override { return "GENERIC_REMAINING"; }
   bool isGeneric() const override { return true; }
 
   static bool classof(const Type *type) {
     return type->getKind() == TK_GenericRemainingType;
   }
+  bool Equals(const Type &other, QualifierCmp) const override;
 
  protected:
-  bool Equals(const Type &other) const override;
+  std::string toStringImpl() const override { return "GENERIC_REMAINING"; }
 };
 
 class NamedType : public Type {
  public:
   NamedType(std::string_view name) : Type(TK_NamedType), name_(name) {}
   std::string_view getName() const { return name_; }
-  std::string toString() const override { return name_; }
   bool isGeneric() const override { return false; }
 
   static bool classof(const Type *type) {
     return type->getKind() == TK_NamedType;
   }
+  bool Equals(const Type &other, QualifierCmp) const override;
 
  protected:
-  bool Equals(const Type &other) const override;
+  std::string toStringImpl() const override { return name_; }
 
  private:
   const std::string name_;
@@ -170,43 +199,39 @@ class CallableType : public Type {
     return type->getKind() == TK_CallableType;
   }
 
-  std::string toString() const override {
-    std::stringstream ss;
-    ss << "\\";
-    for (const Type *type : arg_types_) {
-      ss << type->toString() << " ";
-    }
-    ss << "-> " << ret_type_.toString();
-    return ss.str();
-  }
-
   // Similar to CallableType::Equals(const Type &) but it also takes into
   // account generic argument types.
   bool CallableTypesMatch(const CallableType &rhs) const;
-  bool ArgumentTypesMatch(std::span<const Type *const> args) const;
-  bool ArgumentTypesMatch(const std::vector<const Type *> &args) const {
-    return ArgumentTypesMatch(std::span{args.begin(), args.size()});
+  bool CanApplyArgs(std::span<const Type *const> args) const;
+  bool CanApplyArgs(const std::vector<const Type *> &args) const {
+    return CanApplyArgs(std::span{args.begin(), args.size()});
   }
-  bool ArgumentTypesMatch(std::span<Expr *const> args) const;
-  bool ArgumentTypesMatch(const std::vector<Expr *> &args) const {
-    return ArgumentTypesMatch(std::span{args.begin(), args.size()});
+  bool CanApplyArgs(std::span<Expr *const> args) const;
+  bool CanApplyArgs(const std::vector<Expr *> &args) const {
+    return CanApplyArgs(std::span{args.begin(), args.size()});
   }
+  bool Equals(const Type &other, QualifierCmp) const override;
 
  protected:
-  bool Equals(const Type &other) const override;
+  std::string toStringImpl() const override {
+    return Concat(
+        "\\",
+        Join(arg_types_, " ", [](const Type *t) { return t->toString(); }),
+        " -> ", ret_type_.toString());
+  }
 
  private:
   const Type &ret_type_;
   const std::vector<const Type *> arg_types_;
 };
 
-bool ArgumentTypesMatch(std::span<const Type *const> args1,
-                        std::span<const Type *const> args2);
+bool CanApplyArgs(std::span<const Type *const> args1,
+                  std::span<const Type *const> args2);
 
 class ArrayType : public Type {
  public:
-  ArrayType(const Type &type, size_t num)
-      : Type(TK_ArrayType), type_(type), num_(num) {}
+  ArrayType(const Type &type, size_t num, bool mut = false)
+      : Type(TK_ArrayType), type_(type), num_(num), mutable_(mut) {}
 
   static bool classof(const Type *type) {
     return type->getKind() == TK_ArrayType;
@@ -215,25 +240,24 @@ class ArrayType : public Type {
   bool isGeneric() const override { return type_.isGeneric(); }
   size_t getNumElems() const { return num_; }
   const Type &getElemType() const { return type_; }
-
-  std::string toString() const override {
-    std::stringstream ss;
-    ss << "[" << num_ << " x " << type_.toString() << "]";
-    return ss.str();
-  }
+  bool isMutable() const override { return mutable_; }
+  bool Equals(const Type &other, QualifierCmp) const override;
 
  protected:
-  bool Equals(const Type &other) const override;
+  std::string toStringImpl() const override {
+    return Concat("[", num_, " x ", type_.toString(), "]");
+  }
 
  private:
   const Type &type_;
   const size_t num_;
+  const bool mutable_;
 };
 
 class CompositeType : public Type {
  public:
-  CompositeType(const std::vector<const Type *> &types)
-      : Type(TK_CompositeType), types_(types) {
+  CompositeType(const std::vector<const Type *> &types, bool mut = false)
+      : Type(TK_CompositeType), types_(types), mutable_(mut) {
     assert(!types.empty());
   }
 
@@ -241,15 +265,7 @@ class CompositeType : public Type {
     return type->getKind() == TK_CompositeType;
   }
 
-  std::string toString() const override {
-    std::stringstream ss;
-    ss << "<";
-    for (const Type *type : types_) {
-      ss << type->toString() << " ";
-    }
-    ss << ">";
-    return ss.str();
-  }
+  bool isMutable() const override { return mutable_; }
 
   const auto &getTypes() const { return types_; }
   size_t getNumTypes() const { return types_.size(); }
@@ -258,18 +274,24 @@ class CompositeType : public Type {
     return std::ranges::any_of(types_,
                                [](const Type *ty) { return ty->isGeneric(); });
   }
+  bool Equals(const Type &other, QualifierCmp) const override;
 
  protected:
-  bool Equals(const Type &other) const override;
+  std::string toStringImpl() const override {
+    return Concat(
+        "<", Join(types_, " ", [](const Type *t) { return t->toString(); }),
+        ">");
+  }
 
  private:
   const std::vector<const Type *> types_;
+  const bool mutable_;
 };
 
 class Expr : public Node {
  public:
   Expr(Kind kind, const SourceLocation &start, const Type &type)
-      : Node(kind, start), type_(type) {}
+      : Node(kind, start), type_(type), owner_(nullptr) {}
 
   static bool classof(const Node *node) {
     return NK_ExprFirst <= node->getKind() && node->getKind() <= NK_ExprLast;
@@ -285,9 +307,27 @@ class Expr : public Node {
     users_.erase(&e);
   }
 
+  Expr &getOwner() const { return *owner_; }
+  bool hasOwner() const { return owner_; }
+  void setOwner(Expr &owner) {
+    assert(!hasOwner());
+    assert(users_.contains(&owner) &&
+           "This expression must be owned by one of the other expressions "
+           "using it.");
+    owner_ = &owner;
+  }
+  void swapOwner(Expr &newowner) {
+    assert(hasOwner());
+    assert(users_.contains(&newowner) &&
+           "This expression must be owned by one of the other expressions "
+           "using it.");
+    owner_ = &newowner;
+  }
+
  private:
   const Type &type_;
   std::set<Expr *> users_;
+  Expr *owner_;
 };
 
 // A declaration is a named value that may be defined outside this module. If it
@@ -365,6 +405,7 @@ class Set : public Expr {
         expr_(expr),
         idx_(idx),
         store_(store) {
+    assert(expr.getType().isMutable());
     assert(expr.getType().isValidGetSetType());
     assert(idx.getType().isNamedType("int"));
     expr.AddUser(*this);
@@ -493,6 +534,7 @@ class Callable : public Expr {
 
   std::vector<SourceLocation> getArgLocs() const {
     std::vector<SourceLocation> locs;
+    locs.reserve(args_.size());
     for (const Arg *arg : args_)
       locs.push_back(arg->getStart());
     return locs;
@@ -540,11 +582,14 @@ class Cast : public Expr {
   Expr &expr_;
 };
 
+//
+// decl readc = \IO -> <IO int>
+//
 class Readc : public Expr {
  public:
   Readc(const SourceLocation &start, const Type &type)
       : Expr(NK_Readc, start, type) {
-    assert(CheckType(type));
+    assert(IsReadcType(type));
   }
 
   static bool classof(const Node *node) { return node->getKind() == NK_Readc; }
@@ -555,7 +600,7 @@ class Readc : public Expr {
   }
 
  private:
-  static bool CheckType(const Type &type);
+  static bool IsReadcType(const Type &type);
 };
 
 class Call : public Expr {
@@ -582,6 +627,7 @@ class Call : public Expr {
 
   auto getArgTypes() const {
     std::vector<const Type *> arg_types;
+    arg_types.reserve(args_.size());
     for (const Expr *arg : args_)
       arg_types.push_back(&arg->getType());
     return arg_types;
@@ -589,8 +635,8 @@ class Call : public Expr {
 
   void SwapFunc(Expr &other) {
     assert(other.getType().getReturnType() == func_->getType().getReturnType());
-    assert(llvm::cast<CallableType>(other.getType())
-               .ArgumentTypesMatch(getArgTypes()));
+    assert(
+        llvm::cast<CallableType>(other.getType()).CanApplyArgs(getArgTypes()));
     func_->RemoveUser(*this);
     func_ = &other;
     other.AddUser(*this);
@@ -654,6 +700,7 @@ class AmbiguousCall : public Expr {
 
   auto getArgTypes() const {
     std::vector<const Type *> arg_types;
+    arg_types.reserve(args_.size());
     for (const Expr *arg : args_)
       arg_types.push_back(&arg->getType());
     return arg_types;
@@ -695,11 +742,6 @@ class Char : public Expr {
  private:
   char c_;
 };
-
-// class None : public Expr {
-//  public:
-//   None(const Type &none_t) : Expr(NK_None, none_t) {}
-// };
 
 class Str : public Expr {
  public:
@@ -768,8 +810,8 @@ class If : public Expr {
         cond_(cond),
         if_body_(if_body),
         else_body_(else_body) {
-    assert(type == if_body.getType());
-    assert(type == else_body.getType());
+    assert(type.CanConvertFrom(if_body));
+    assert(type.CanConvertFrom(else_body));
     assert(cond.getType().isNamedType(builtins::kBoolTypeName));
     cond.AddUser(*this);
     if_body.AddUser(*this);

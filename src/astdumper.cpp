@@ -126,7 +126,7 @@ void ASTDumper::Visit(const Call &call) {
 }
 
 void ASTDumper::Visit(const Zero &zero) {
-  Pad() << "Zero " << &zero << " " << zero.getType().toString();
+  Pad() << "Zero " << &zero << " " << zero.getType().toString() << "\n";
 }
 
 void ASTDumper::Visit(const Composite &comp) {

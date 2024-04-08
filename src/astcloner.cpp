@@ -35,8 +35,11 @@ Node &ASTCloner::Visit(const Get &get) {
 }
 
 Node &ASTCloner::Visit(const Set &set) {
-  return builder_.getSet(set.getStart(), VisitExpr(set.getExpr()),
-                         VisitExpr(set.getIdx()), VisitExpr(set.getStore()));
+  Expr &e = VisitExpr(set.getExpr());
+  if (!e.getType().isMutable())
+    Dump(e);
+  return builder_.getSet(set.getStart(), e, VisitExpr(set.getIdx()),
+                         VisitExpr(set.getStore()));
 }
 
 Node &ASTCloner::Visit(const AmbiguousCall &call) {
@@ -44,7 +47,7 @@ Node &ASTCloner::Visit(const AmbiguousCall &call) {
   auto found = std::find_if(
       call.getFuncs().begin(), call.getFuncs().end(), [&args](const Expr *e) {
         const auto &callable_ty = llvm::cast<CallableType>(e->getType());
-        return callable_ty.ArgumentTypesMatch(args);
+        return callable_ty.CanApplyArgs(args);
       });
   assert(found != call.getFuncs().end() &&
          "Could not find a callable where the arguments can apply.");
@@ -52,7 +55,7 @@ Node &ASTCloner::Visit(const AmbiguousCall &call) {
                       [&args](const Expr *func) {
                         const auto &callable_ty =
                             llvm::cast<CallableType>(func->getType());
-                        return callable_ty.ArgumentTypesMatch(args);
+                        return callable_ty.CanApplyArgs(args);
                       }) &&
          "Cannot resolve which function to call from arguments");
 

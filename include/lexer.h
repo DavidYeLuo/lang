@@ -22,7 +22,6 @@ class Token {
     TK_Readc,
     TK_Call,
     TK_ImpureCall,
-    // TK_None,
     TK_Str,
     TK_Char,
     TK_Let,
@@ -34,6 +33,7 @@ class Token {
     TK_False,
     TK_Zero,
     TK_As,
+    TK_Mut,
     TK_LAngleBrack,  // <
     TK_RAngleBrack,  // >
     TK_LSqBrack,     // [
@@ -138,7 +138,7 @@ class Lexer {
   int getNextChar();
   int PeekNextChar(SourceLocation &loc);
   void ConsumeChar(char expected) {
-    [[maybe_unused]] char c = getNextChar();
+    [[maybe_unused]] auto c = getNextChar();
     assert(c == expected && "Did not consume the expected character");
   }
 

@@ -56,7 +56,7 @@ class Parser {
   Result<If *> ParseIf(const Type *hint = nullptr);
   Result<BinOp *> ParseBinOp(const Type *hint = nullptr);
   Result<Expr *> ParseIdentifier(const Type *hint = nullptr);
-  Result<const Type *> ParseType(bool parse_callable_names = false);
+  Result<const Type *> ParseType();
 
  private:
   Result<Declare *> ParseDefineImpl();
@@ -147,8 +147,7 @@ class Parser {
     auto found_loc = local_callable_scope_.find(name);
     if (found_loc != local_callable_scope_.end()) {
       for (const auto &p : found_loc->second) {
-        if (!arg_types ||
-            ArgumentTypesMatch(p.second->getArgTypes(), *arg_types))
+        if (!arg_types || CanApplyArgs(p.second->getArgTypes(), *arg_types))
           exprs.push_back(p.first);
       }
     }
@@ -156,7 +155,7 @@ class Parser {
     auto decls = module_.getDeclares(name);
     for (Declare *decl : decls) {
       if (const auto *ty = llvm::dyn_cast<CallableType>(&decl->getType())) {
-        if (!arg_types || ArgumentTypesMatch(ty->getArgTypes(), *arg_types))
+        if (!arg_types || CanApplyArgs(ty->getArgTypes(), *arg_types))
           exprs.push_back(decl);
       }
     }

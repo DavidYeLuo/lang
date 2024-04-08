@@ -6,42 +6,66 @@
 
 namespace lang {
 
+bool Type::CheckQualifiers(const Type &rhs, QualifierCmp cmp) const {
+  switch (cmp) {
+    case QualifierCmp::Exact:
+      return isMutable() == rhs.isMutable();
+    case QualifierCmp::Ignore:
+      return true;
+    case QualifierCmp::RetainImmutability:
+      return !isMutable() || rhs.isMutable();
+  }
+  __builtin_unreachable();
+}
+
 bool Type::isValidGetSetType() const {
   return llvm::isa<CompositeType>(this) || llvm::isa<ArrayType>(this) ||
          isGeneric();
 }
 
-bool GenericType::Equals(const Type &other) const {
-  return llvm::isa<GenericType>(other);
+bool GenericType::Equals(const Type &other, QualifierCmp cmp) const {
+  return CheckQualifiers(other, cmp) && llvm::isa<GenericType>(other);
 }
 
-bool GenericRemainingType::Equals(const Type &other) const {
+bool GenericRemainingType::Equals(const Type &other, QualifierCmp) const {
+  // Don't check the qualifiers since a GENERIC_REMAINING can have any
+  // qualifiers.
   return llvm::isa<GenericRemainingType>(other);
 }
 
-bool NamedType::Equals(const Type &rhs) const {
+bool NamedType::Equals(const Type &rhs, QualifierCmp cmp) const {
+  if (!CheckQualifiers(rhs, cmp))
+    return false;
+
   if (const auto *named_rhs = llvm::dyn_cast<NamedType>(&rhs))
     return getName() == named_rhs->getName();
+
   return false;
 }
 
-bool ArrayType::Equals(const Type &rhs) const {
+bool ArrayType::Equals(const Type &rhs, QualifierCmp cmp) const {
+  if (!CheckQualifiers(rhs, cmp))
+    return false;
+
   if (const auto *array_rhs = llvm::dyn_cast<ArrayType>(&rhs)) {
     if (getNumElems() != array_rhs->getNumElems())
       return false;
 
-    return getElemType() == array_rhs->getElemType();
+    return getElemType().Equals(array_rhs->getElemType(), cmp);
   }
   return false;
 }
 
-bool CompositeType::Equals(const Type &rhs) const {
+bool CompositeType::Equals(const Type &rhs, QualifierCmp cmp) const {
+  if (!CheckQualifiers(rhs, cmp))
+    return false;
+
   if (const auto *composite_rhs = llvm::dyn_cast<CompositeType>(&rhs)) {
     if (getTypes().size() != composite_rhs->getTypes().size())
       return false;
 
     for (size_t i = 0; i < getTypes().size(); ++i) {
-      if (getTypeAt(i) != composite_rhs->getTypeAt(i))
+      if (!getTypeAt(i).Equals(composite_rhs->getTypeAt(i), cmp))
         return false;
     }
 
@@ -50,34 +74,37 @@ bool CompositeType::Equals(const Type &rhs) const {
   return false;
 }
 
-bool CallableType::Equals(const Type &rhs) const {
+bool CallableType::Equals(const Type &rhs, QualifierCmp cmp) const {
+  if (!CheckQualifiers(rhs, cmp))
+    return false;
+
   if (const auto *callable_rhs = llvm::dyn_cast<CallableType>(&rhs)) {
     if (getArgTypes().size() != callable_rhs->getArgTypes().size())
       return false;
 
     for (size_t i = 0; i < getArgTypes().size(); ++i) {
-      if (*getArgTypes().at(i) != *callable_rhs->getArgTypes().at(i))
+      if (!getArgTypes().at(i)->Equals(*callable_rhs->getArgTypes().at(i), cmp))
         return false;
     }
 
-    return getReturnType() == callable_rhs->getReturnType();
+    return getReturnType().Equals(callable_rhs->getReturnType(), cmp);
   }
   return false;
 }
 
-bool CallableType::ArgumentTypesMatch(std::span<const Type *const> args) const {
-  return lang::ArgumentTypesMatch(arg_types_, args);
+bool CallableType::CanApplyArgs(std::span<const Type *const> args) const {
+  return lang::CanApplyArgs(arg_types_, args);
 }
 
-bool CallableType::ArgumentTypesMatch(std::span<Expr *const> args) const {
+bool CallableType::CanApplyArgs(std::span<Expr *const> args) const {
   std::vector<const Type *> arg_types(args.size());
   std::transform(args.begin(), args.end(), arg_types.begin(),
                  [](const Expr *e) { return &e->getType(); });
-  return ArgumentTypesMatch(arg_types);
+  return CanApplyArgs(arg_types);
 }
 
-bool ArgumentTypesMatch(std::span<const Type *const> args1,
-                        std::span<const Type *const> args2) {
+bool CanApplyArgs(std::span<const Type *const> args1,
+                  std::span<const Type *const> args2) {
   // Let's take this example:
   //
   //   def writeln = \IO io GENERIC arg -> IO
@@ -109,14 +136,14 @@ bool ArgumentTypesMatch(std::span<const Type *const> args1,
       return false;
     // Check all arguments up to the generic one.
     auto dist = args1.end() - 1 - args1.begin();
-    return ArgumentTypesMatch(args1.subspan(0, dist), args2.subspan(0, dist));
+    return CanApplyArgs(args1.subspan(0, dist), args2.subspan(0, dist));
   }
   if (!args2.empty() && llvm::isa<GenericRemainingType>(args2.back())) {
     if (args1.size() < args2.size())
       return false;
     // Check all arguments up to the generic one.
     auto dist = args2.end() - 1 - args2.begin();
-    return ArgumentTypesMatch(args1.subspan(0, dist), args2.subspan(0, dist));
+    return CanApplyArgs(args1.subspan(0, dist), args2.subspan(0, dist));
   }
 
   if (args1.size() != args2.size())
@@ -126,7 +153,12 @@ bool ArgumentTypesMatch(std::span<const Type *const> args1,
     if (args1[i]->isGeneric() || args2[i]->isGeneric())
       continue;
 
-    if (*args1[i] != *args2[i])
+    if (!args1[i]->CanConvertFrom(*args2[i]))
+      return false;
+
+    // The paramater type is mutable so the argument passed here must also be
+    // mutable.
+    if (args1[i]->isMutable() && !args2[i]->isMutable())
       return false;
   }
 
@@ -138,7 +170,7 @@ bool CallableType::CallableTypesMatch(const CallableType &rhs) const {
     return *this == rhs;
   if (getReturnType() != rhs.getReturnType())
     return false;
-  return lang::ArgumentTypesMatch(getArgTypes(), rhs.getArgTypes());
+  return lang::CanApplyArgs(getArgTypes(), rhs.getArgTypes());
 }
 
 bool Type::Matches(const Type &other) const {
@@ -149,9 +181,9 @@ bool Type::Matches(const Type &other) const {
   }
 
   if (other.isGeneric() || isGeneric())
-    return true;
+    return isMutable() == other.isMutable();
 
-  return *this == other;
+  return Equals(other, QualifierCmp::RetainImmutability);
 }
 
 void Module::MangleDecls() {
@@ -190,8 +222,7 @@ bool Type::isCompositeOrArrayType() const {
   return llvm::isa<CompositeType>(this) || llvm::isa<ArrayType>(this);
 }
 
-// decl readc = \IO -> <IO int>
-bool Readc::CheckType(const Type &type) {
+bool Readc::IsReadcType(const Type &type) {
   if (const auto *callable_ty = llvm::dyn_cast<CallableType>(&type)) {
     if (const auto *comp_ty =
             llvm::dyn_cast<CompositeType>(&callable_ty->getReturnType())) {
@@ -241,6 +272,24 @@ bool Type::isGenericRemainingCallable() const {
         [](const Type *t) { return llvm::isa<GenericRemainingType>(t); });
   }
   return false;
+}
+
+bool Type::CanConvertFrom(const Expr &e) const {
+  return CanConvertFrom(e.getType());
+}
+
+bool Type::CanConvertFrom(const Type &from) const {
+  if (isMutable() && !from.isMutable())
+    return false;
+
+  // Any type can be converted to a generic type.
+  //
+  // Likewise, we do not know enough about converting from a generic type to a
+  // non-generic type until lowering.
+  if (isGeneric() || from.isGeneric())
+    return true;
+
+  return Equals(from, QualifierCmp::RetainImmutability);
 }
 
 void Module::AddDeclaration(std::string_view name, Declare &expr) {

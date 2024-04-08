@@ -98,7 +98,7 @@ Result<Token> Lexer::LexImpl() {
       return Result<Token>(Token::TK_RParen, start,
                            SourceLocation(row_, col_ + 1, next_pos), ")");
     case '-': {
-      char next = getNextChar();
+      int next = getNextChar();
       if (next != '>')
         return Diagnostic(input_)
                << start << ": Expected `->`; "
@@ -108,9 +108,13 @@ Result<Token> Lexer::LexImpl() {
     }
     case '"': {
       std::string buff;
-      buff += ch;
+      buff += static_cast<char>(ch);
       ch = getNextChar();
       while (ch != '"') {
+        if (ch == EOF) {
+          return Diagnostic(input_)
+                 << getCurrentLoc() << ": Unexpected EOF while parsing string";
+        }
         if (ch == '\\') {
           ch = getNextChar();
           if (ch == 'n')
@@ -118,10 +122,10 @@ Result<Token> Lexer::LexImpl() {
           else if (ch == 't')
             ch = '\t';
         }
-        buff += ch;
+        buff += static_cast<char>(ch);
         ch = getNextChar();
       }
-      buff += ch;
+      buff += static_cast<char>(ch);
       assert(buff.front() == '"' && buff.back() == '"');
       SourceLocation end;
       PeekNextChar(end);
@@ -129,23 +133,28 @@ Result<Token> Lexer::LexImpl() {
     }
     case '\'': {
       std::string buff;
-      buff += ch;
+      buff += static_cast<char>(ch);
       ch = getNextChar();
       if (ch == '\\') {
         // Handle literals starting with `\`.
         ch = getNextChar();
+        if (ch == EOF) {
+          return Diagnostic(input_)
+                 << getCurrentLoc()
+                 << ": Unexpected EOF while parsing character";
+        }
         if (ch == 'n')
           ch = '\n';
         else if (ch == 't')
           ch = '\t';
       }
-      buff += ch;
+      buff += static_cast<char>(ch);
       ch = getNextChar();
       if (ch != '\'')
         return Diagnostic(input_)
                << start << ": Expected char literal to end with closing `'`; "
                << " instead found `" << ch << "`" << DumpLine{start};
-      buff += ch;
+      buff += static_cast<char>(ch);
       SourceLocation end;
       PeekNextChar(end);
       return Result<Token>(Token::TK_Char, start, end, buff);
@@ -155,17 +164,18 @@ Result<Token> Lexer::LexImpl() {
   }
 
   std::string buff;
-  buff += ch;
+  buff += static_cast<char>(ch);
   ch = input_.peek();
 
   while (isalnum(ch) || ch == '_') {
-    buff += getNextChar();
+    buff += static_cast<char>(getNextChar());
     ch = input_.peek();
   }
 
   SourceLocation end;
   PeekNextChar(end);
 
+  // TODO: This should probably be in a map.
   if (buff == "def")
     return Result<Token>(Token::TK_Def, start, end, buff);
   if (buff == "decl")
@@ -186,13 +196,14 @@ Result<Token> Lexer::LexImpl() {
     return Result<Token>(Token::TK_Keep, start, end, buff);
   if (buff == "as")
     return Result<Token>(Token::TK_As, start, end, buff);
+  if (buff == "mut")
+    return Result<Token>(Token::TK_Mut, start, end, buff);
   if (buff == "zero")
     return Result<Token>(Token::TK_Zero, start, end, buff);
   if (buff == "if")
     return Result<Token>(Token::TK_If, start, end, buff);
   if (buff == "else")
     return Result<Token>(Token::TK_Else, start, end, buff);
-  // if (buff == "None") return Result<Token>(Token::TK_None, start, end, buff);
   if (buff == "true")
     return Result<Token>(Token::TK_True, start, end, buff);
   if (buff == "false")
