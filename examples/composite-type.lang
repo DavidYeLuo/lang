@@ -1,20 +1,18 @@
 def unwrap = \char c -> <int char>
   <CAST int c c>
 
+def write = \IO io GENERIC arg GENERIC_REMAINING rem -> IO
+  write(write(io arg) rem)
+
 def func = \IO io char c char last -> IO
   if LT last c
     io
   else
-    let res = call unwrap c end
-    let res0 = GET int res 0
-    let res1 = GET char res 1
-    let io2 = call write io res0 end
-    let io3 = call write io2 " " end
-    let io4 = call write io3 res1 end
-    let io5 = call write io4 "\n" end
-    call func io5 ADD c CAST char 1 last end
+    let res = unwrap(c)
+    let res0 = GET res 0
+    let res1 = GET res 1
+    let io2 = write(io res0 " " res1 "\n")
+    func(io2 ADD c CAST char 1 last)
 
 def main = \IO io -> IO
-  let start = 'a'
-  let last = 'z'
-  call func io start last end
+  func(io 'a' 'z')

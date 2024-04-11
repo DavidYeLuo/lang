@@ -336,6 +336,12 @@ TEST(RegressionTests, Regression1) {
                             ADDRESS_SANITIZE_TESTS));
 }
 
+TEST(RegressionTests, Regression2) {
+  std::ifstream input(EXAMPLES_DIR "/regression-test-2.lang");
+  BuildAndCheckOutput(
+      input, ":: Error: expected to consume `aa` but instead found `abc`\n");
+}
+
 TEST(E2E, TypeDeduction) {
   std::ifstream input(EXAMPLES_DIR "/type-deduction.lang");
   BuildAndCheckOutput(input, "abc\n123\n");

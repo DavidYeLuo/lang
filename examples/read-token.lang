@@ -1,6 +1,6 @@
 def writeln_str = \IO io [128 x char] s -> IO
-  let io2 = call write io s end
-  call write io2 "\n" end
+  let io2 = write(io s)
+  write(io2 "\n")
 
 def any = \bool a -> bool
   a
@@ -10,8 +10,8 @@ def any = \bool a GENERIC_REMAINING remaining -> bool
 
 def read_token = \IO io mut [128 x char] buff int idx -> <[128 x char] IO>
   let res = call readc io end
-  let io2 = GET IO res 0
-  let c = GET int res 1
+  let io2 = GET res 0
+  let c = GET res 1
   if any(LT c 0
          EQ CAST char c ' '
          EQ CAST char c '\n'
@@ -19,11 +19,8 @@ def read_token = \IO io mut [128 x char] buff int idx -> <[128 x char] IO>
     <buff io2>
   else
     let newbuff = SET buff idx CAST char c
-    call read_token io2 newbuff ADD idx 1 end
+    read_token(io2 newbuff ADD idx 1)
 
 def main = \IO io -> IO
-  let res = call read_token io zero as mut [128 x char] 0 end
-  call writeln_str
-    GET IO res 1
-    GET [128 x char] res 0
-    end
+  let res = read_token(io zero as mut [128 x char] 0)
+  writeln_str(GET res 1 GET res 0)

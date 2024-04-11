@@ -21,13 +21,12 @@ jobs:
         wget https://apt.llvm.org/llvm.sh
         chmod +x llvm.sh
         sudo ./llvm.sh 16
-        sudo apt-get -y install clang-format-16
     - name: CMake
       run: |
         mkdir build
         cd build
         cmake .. -GNinja -DCMAKE_C_COMPILER=gcc-12 -DCMAKE_CXX_COMPILER=g++-12 \
-          -DLLVM_CONFIG=llvm-config-16 -DCLANG_FORMAT=clang-format-16 \
+          -DLLVM_CONFIG=llvm-config-16 \
           -DCMAKE_CXX_FLAGS="-fsanitize=address -fsanitize=undefined -ftrivial-auto-var-init=pattern"
     - name: Ninja
       run: |
@@ -37,7 +36,3 @@ jobs:
       run: |
         cd build
         ./bin/lang-tests
-    - name: Check formatting
-      run: |
-        cd build
-        ninja format-check

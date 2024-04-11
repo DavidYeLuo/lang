@@ -6,7 +6,7 @@ def read_from_buff = \IO io [3 x [4 x char]] buff int x -> IO
   if GE x 3
     io
   else
-    let newio = writeln(io GET [4 x char] buff x)
+    let newio = writeln(io GET buff x)
     read_from_buff(newio buff ADD x 1)
 
 # SET returns a new composite type of the same type as its first argument, but
