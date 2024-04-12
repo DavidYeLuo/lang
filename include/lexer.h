@@ -49,6 +49,7 @@ class Token {
     TK_OR,
     TK_ADD,
     TK_SUB,
+    TK_MUL,
     TK_MOD,
     TK_End,
     TK_GENERIC,
@@ -72,6 +73,7 @@ class Token {
     switch (kind_) {
       case TK_ADD:
       case TK_SUB:
+      case TK_MUL:
       case TK_LT:
       case TK_GE:
       case TK_EQ:

@@ -220,6 +220,8 @@ Result<Token> Lexer::LexImpl() {
     return Result<Token>(Token::TK_ADD, start, end, buff);
   if (buff == "SUB")
     return Result<Token>(Token::TK_SUB, start, end, buff);
+  if (buff == "MUL")
+    return Result<Token>(Token::TK_MUL, start, end, buff);
   if (buff == "MOD")
     return Result<Token>(Token::TK_MOD, start, end, buff);
   if (buff == "CAST")
