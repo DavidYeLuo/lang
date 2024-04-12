@@ -1,0 +1,35 @@
+def writeln = \IO io GENERIC s -> IO
+  write(write(io s) "\n")
+
+def read_from_buff = \IO io [3 x [4 x char]] buff int x -> IO
+  if GE x 3
+    io
+  else
+    # The alternative GET syntax is
+    #
+    #   `<aggregate> [ <index> ]
+    #
+    # which corresponds to
+    #
+    #   GET <aggregate> <index>
+    #
+    let newio = writeln(io buff[x])
+    read_from_buff(newio buff ADD x 1)
+
+def write_to_buff = \mut GENERIC buff int x GENERIC s -> mut [3 x [4 x char]]
+  # The alternative SET syntax is
+  #
+  #   `<aggregate> [ <index> ] : <setvalue>`
+  #
+  # which corresponds to
+  #
+  #   SET <aggregate> <index> <setvalue>
+  #
+  buff[x] : s
+
+def main = \IO io -> IO
+  let buff = zero as mut [3 x [4 x char]]
+  let buff2 = write_to_buff(buff 0 "abc")
+  let buff3 = write_to_buff(buff2 1 "xyz")
+  let buff4 = write_to_buff(buff3 2 "123")
+  read_from_buff(io buff4 0)

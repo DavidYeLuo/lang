@@ -120,7 +120,7 @@ class Type {
 
   const Type &getReturnType() const;
   bool Matches(const Type &other) const;
-  bool isValidGetSetType() const;
+  bool isAggregateType() const;
 
  protected:
   virtual std::string toStringImpl() const = 0;

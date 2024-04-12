@@ -3,13 +3,57 @@
 #include <algorithm>
 #include <cassert>
 #include <cctype>
+#include <map>
 
 #include "lang.h"
 
 namespace lang {
 
+namespace {
+
+const std::map<std::string, Token::TokenKind> kKeywordMap{
+    {"def", Token::TK_Def},
+    {"decl", Token::TK_Decl},
+    {"cdecl", Token::TK_CDecl},
+    {"call", Token::TK_Call},
+    {"impurecall", Token::TK_ImpureCall},
+    {"readc", Token::TK_Readc},
+    {"end", Token::TK_End},
+    {"let", Token::TK_Let},
+    {"keep", Token::TK_Keep},
+    {"as", Token::TK_As},
+    {"mut", Token::TK_Mut},
+    {"zero", Token::TK_Zero},
+    {"if", Token::TK_If},
+    {"else", Token::TK_Else},
+    {"true", Token::TK_True},
+    {"false", Token::TK_False},
+    {"LT", Token::TK_LT},
+    {"GE", Token::TK_GE},
+    {"EQ", Token::TK_EQ},
+    {"OR", Token::TK_OR},
+    {"ADD", Token::TK_ADD},
+    {"SUB", Token::TK_SUB},
+    {"MOD", Token::TK_MOD},
+    {"CAST", Token::TK_CAST},
+    {"GET", Token::TK_GET},
+    {"SET", Token::TK_SET},
+    {"GENERIC", Token::TK_GENERIC},
+    {"GENERIC_REMAINING", Token::TK_GENERIC_REMAINING},
+};
+
+}  // namespace
+
 int Lexer::getNextChar() {
-  int ch = input_.get();
+  assert(input_ && "Attempting to read from bad input.");
+
+  if (input_.eof()) {
+    // This means we have toggled the eof bit prior. So we don't need to update
+    // any members.
+    return EOF;
+  }
+
+  auto ch = input_.get();
   if (ch == '\n') {
     ++row_;
     col_ = 0;
@@ -20,11 +64,28 @@ int Lexer::getNextChar() {
 }
 
 int Lexer::PeekNextChar(SourceLocation &loc) {
-  int ch = input_.peek();
+  assert(input_ && "Attempting to read from bad input.");
+
   loc.setRow(row_);
   loc.setCol(col_ + 1);
-  loc.setPositionIndicator(input_.tellg() +
-                           static_cast<std::istream::off_type>(1));
+
+  if (input_.eof()) {
+    loc.setEof();
+    return EOF;
+  }
+
+  auto ch = input_.peek();
+  if (ch == EOF) {
+    // The `peek` has just set the eof bit.
+    loc.setEof();
+  } else {
+    assert(
+        input_.good() &&
+        "None of the bits must be set otherwise tellg will set the fail bit");
+    loc.setPositionIndicator(input_.tellg() +
+                             static_cast<std::istream::off_type>(1));
+  }
+  assert(input_);
   return ch;
 }
 
@@ -70,8 +131,13 @@ Result<Token> Lexer::LexImpl() {
   assert(!isspace(ch) && ch != '#' &&
          "Should've skipped over whitespace and comments by this point.");
 
-  auto next_pos = input_.tellg() + static_cast<std::istream::off_type>(1);
+  auto next_pos =
+      !input_.good()
+          ? SourceLocation::eof()
+          : (input_.tellg() + static_cast<std::istream::off_type>(1));
+  assert(input_);
 
+  // TODO: Most of these can be in a char map.
   switch (ch) {
     case '\\':
       return Result<Token>(Token::TK_Lambda, start,
@@ -79,6 +145,9 @@ Result<Token> Lexer::LexImpl() {
     case '=':
       return Result<Token>(Token::TK_Assign, start,
                            SourceLocation(row_, col_ + 1, next_pos), "=");
+    case ':':
+      return Result<Token>(Token::TK_Colon, start,
+                           SourceLocation(row_, col_ + 1, next_pos), ":");
     case '<':
       return Result<Token>(Token::TK_LAngleBrack, start,
                            SourceLocation(row_, col_ + 1, next_pos), "<");
@@ -175,63 +244,9 @@ Result<Token> Lexer::LexImpl() {
   SourceLocation end;
   PeekNextChar(end);
 
-  // TODO: This should probably be in a map.
-  if (buff == "def")
-    return Result<Token>(Token::TK_Def, start, end, buff);
-  if (buff == "decl")
-    return Result<Token>(Token::TK_Decl, start, end, buff);
-  if (buff == "cdecl")
-    return Result<Token>(Token::TK_CDecl, start, end, buff);
-  if (buff == "call")
-    return Result<Token>(Token::TK_Call, start, end, buff);
-  if (buff == "impurecall")
-    return Result<Token>(Token::TK_ImpureCall, start, end, buff);
-  if (buff == "readc")
-    return Result<Token>(Token::TK_Readc, start, end, buff);
-  if (buff == "end")
-    return Result<Token>(Token::TK_End, start, end, buff);
-  if (buff == "let")
-    return Result<Token>(Token::TK_Let, start, end, buff);
-  if (buff == "keep")
-    return Result<Token>(Token::TK_Keep, start, end, buff);
-  if (buff == "as")
-    return Result<Token>(Token::TK_As, start, end, buff);
-  if (buff == "mut")
-    return Result<Token>(Token::TK_Mut, start, end, buff);
-  if (buff == "zero")
-    return Result<Token>(Token::TK_Zero, start, end, buff);
-  if (buff == "if")
-    return Result<Token>(Token::TK_If, start, end, buff);
-  if (buff == "else")
-    return Result<Token>(Token::TK_Else, start, end, buff);
-  if (buff == "true")
-    return Result<Token>(Token::TK_True, start, end, buff);
-  if (buff == "false")
-    return Result<Token>(Token::TK_False, start, end, buff);
-  if (buff == "LT")
-    return Result<Token>(Token::TK_LT, start, end, buff);
-  if (buff == "GE")
-    return Result<Token>(Token::TK_GE, start, end, buff);
-  if (buff == "EQ")
-    return Result<Token>(Token::TK_EQ, start, end, buff);
-  if (buff == "OR")
-    return Result<Token>(Token::TK_OR, start, end, buff);
-  if (buff == "ADD")
-    return Result<Token>(Token::TK_ADD, start, end, buff);
-  if (buff == "SUB")
-    return Result<Token>(Token::TK_SUB, start, end, buff);
-  if (buff == "MOD")
-    return Result<Token>(Token::TK_MOD, start, end, buff);
-  if (buff == "CAST")
-    return Result<Token>(Token::TK_CAST, start, end, buff);
-  if (buff == "GET")
-    return Result<Token>(Token::TK_GET, start, end, buff);
-  if (buff == "SET")
-    return Result<Token>(Token::TK_SET, start, end, buff);
-  if (buff == "GENERIC")
-    return Result<Token>(Token::TK_GENERIC, start, end, buff);
-  if (buff == "GENERIC_REMAINING")
-    return Result<Token>(Token::TK_GENERIC_REMAINING, start, end, buff);
+  auto found_kw = kKeywordMap.find(buff);
+  if (found_kw != kKeywordMap.end())
+    return Result<Token>(found_kw->second, start, end, buff);
 
   if (std::all_of(buff.begin(), buff.end(), isdigit))
     return Result<Token>(Token::TK_Int, start, end, buff);

@@ -228,6 +228,15 @@ TEST(E2E, Buffer2) {
   BuildAndCheckOutput(input, kExpected);
 }
 
+TEST(E2E, AltGetSetSyntax) {
+  std::ifstream input(EXAMPLES_DIR "/alt-get-syntax.lang");
+  constexpr char kExpected[] =
+      "abc\n"
+      "xyz\n"
+      "123\n";
+  BuildAndCheckOutput(input, kExpected);
+}
+
 TEST(E2E, PrintChars) {
   std::ifstream input(EXAMPLES_DIR "/composite-type.lang");
   constexpr char kExpected[] =

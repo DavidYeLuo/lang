@@ -34,6 +34,7 @@ class Token {
     TK_Zero,
     TK_As,
     TK_Mut,
+    TK_Colon,        // :
     TK_LAngleBrack,  // <
     TK_RAngleBrack,  // >
     TK_LSqBrack,     // [
@@ -123,7 +124,10 @@ class Lexer {
   // location of the next token AFTER whitespace, instead opt for peeking and
   // checking the resulting token.
   SourceLocation getCurrentLoc() const {
-    return SourceLocation(row_, col_, input_.tellg());
+    assert(input_);
+    SourceLocation loc(row_, col_, input_.tellg());
+    assert(input_);
+    return loc;
   }
 
   SourceLocation PeekLoc() {
