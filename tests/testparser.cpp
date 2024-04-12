@@ -73,8 +73,13 @@ TEST(Errors, VariadicMultipleCallableOverrides) {
 
 TEST(Errors, NonCompileTimeIdxSet) {
   constexpr std::string_view kExpectedError =
-      "1:29: Indexing a composite type requires a compile-time constant "
-      "integer";
+      "1:40: Indexing a composite type requires a compile-time constant "
+      "integer\n"
+      "def func = \\mut <int> b int x -> <int> SET b x 0\n"
+      "                                       ^\n"
+      "1:29: Index declared here\n"
+      "def func = \\mut <int> b int x -> <int> SET b x 0\n"
+      "                            ^";
   std::stringstream input;
   input << "def func = \\mut <int> b int x -> <int> SET b x 0";
   TestParseError(input, kExpectedError);
@@ -82,8 +87,13 @@ TEST(Errors, NonCompileTimeIdxSet) {
 
 TEST(Errors, NonCompileTimeIdxGet) {
   constexpr std::string_view kExpectedError =
-      "1:25: Indexing a composite type requires a compile-time constant "
-      "integer";
+      "1:34: Indexing a composite type requires a compile-time constant "
+      "integer\n"
+      "def func = \\<int> b int x -> int GET b x\n"
+      "                                 ^\n"
+      "1:25: Index declared here\n"
+      "def func = \\<int> b int x -> int GET b x\n"
+      "                        ^";
   std::stringstream input;
   input << "def func = \\<int> b int x -> int GET b x";
   TestParseError(input, kExpectedError);

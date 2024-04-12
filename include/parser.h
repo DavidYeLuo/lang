@@ -46,7 +46,6 @@ class Parser {
   Result<Str *> ParseStr();
   Result<Char *> ParseChar();
   Result<Int *> ParseInt();
-  // Result<const None *> ParseNone();
   Result<Cast *> ParseCast();
   Result<Get *> ParseGet();
   Result<Set *> ParseSet();
@@ -190,6 +189,18 @@ class Parser {
     return local_scope_.find(name) != local_scope_.end() ||
            getNumPossibleCallables(name) > 0;
   }
+
+  // We have finished parsing a primary expression. Check for the alternate
+  // syntaxes where stuff can come after the primary expression. Examples are
+  // the alt call syntax which start with "(" or the alt GET/SET syntax which
+  // start with "[".
+  Result<Expr *> ParseAltSyntaxes(Expr &expr);
+
+  // Parse an expression meant to be the index for an aggregate type.
+  Result<Expr *> ParseAggregateIndexExpr(const Type &agg_ty,
+                                         const SourceLocation &agg_loc);
+
+  const Type &getGetResultType(const Type &agg_ty, const Expr &idx);
 
   Lexer &lexer_;
   lang::Module module_;

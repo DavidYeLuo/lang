@@ -18,7 +18,7 @@ bool Type::CheckQualifiers(const Type &rhs, QualifierCmp cmp) const {
   __builtin_unreachable();
 }
 
-bool Type::isValidGetSetType() const {
+bool Type::isAggregateType() const {
   return llvm::isa<CompositeType>(this) || llvm::isa<ArrayType>(this) ||
          isGeneric();
 }
@@ -315,12 +315,14 @@ Set::Set(const SourceLocation &start, Expr &expr, Expr &idx, Expr &store)
       idx_(idx),
       store_(store) {
   assert(expr.getType().isMutable());
-  assert(expr.getType().isValidGetSetType());
+  assert(expr.getType().isAggregateType());
   assert(idx.getType().isNamedType("int"));
 
-  if (llvm::isa<CompositeType>(getType())) {
-    assert(llvm::isa<Int>(idx) &&
-           "Composite types must be indexed by a constant value");
+  if (const auto *comp_ty = llvm::dyn_cast<CompositeType>(&getType())) {
+    Int &i = llvm::cast<Int>(idx);
+    assert(comp_ty->getTypeAt(i.getInt()) == store.getType() &&
+           "Store type does not match type type at the index of this composite "
+           "type");
   }
 
   expr.AddUser(*this);
@@ -330,7 +332,7 @@ Set::Set(const SourceLocation &start, Expr &expr, Expr &idx, Expr &store)
 
 Get::Get(const SourceLocation &start, const Type &type, Expr &expr, Expr &idx)
     : Expr(NK_Get, start, type), expr_(expr), idx_(idx) {
-  assert(expr.getType().isValidGetSetType());
+  assert(expr.getType().isAggregateType());
   assert(idx.getType().isNamedType("int"));
 
   if (llvm::isa<CompositeType>(getType())) {
