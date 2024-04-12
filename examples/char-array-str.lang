@@ -9,4 +9,4 @@ def func = \ -> <[128 x char]>
 
 def main = \IO io -> IO
   let s = call func end
-  write(write(io GET [128 x char] s 0) "\n")
+  write(write(io GET s 0) "\n")

@@ -25,7 +25,8 @@ std::ostream &ASTDumper::Pad() {
 }
 
 void ASTDumper::Visit(const Declare &declare) {
-  Pad() << "Declare " << &declare << " name=" << declare.getName()
+  Pad() << "Declare " << declare.getStart() << " " << &declare
+        << " name=" << declare.getName()
         << " type=" << declare.getType().toString()
         << " iswrite=" << declare.isBuiltinWrite() << "\n";
   if (declare.isDefinition()) {

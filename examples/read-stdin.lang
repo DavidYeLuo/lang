@@ -1,5 +1,5 @@
 def main = \IO io -> IO
-  let x = call readc io end
-  let io2 = GET IO x 0
-  let c = GET int x 1
-  call write io2 CAST char c end
+  let x = readc(io)
+  let io2 = GET x 0
+  let c = GET x 1
+  write(io2 CAST char c)

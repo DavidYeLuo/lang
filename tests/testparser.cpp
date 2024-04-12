@@ -25,19 +25,22 @@ TEST(Parser, GenericRemainingArgumentTypesMatch) {
   ASSERT_TRUE(callable_ty2.CanApplyArgs(args));
 }
 
+void TestParseError(std::istream &input, std::string_view expected_err) {
+  lang::Lexer lexer(input);
+  lang::Parser parser(lexer);
+  auto res = parser.Parse();
+  ASSERT_TRUE(res.hasError());
+  ASSERT_EQ(res.getError(), expected_err) << res.getError();
+}
+
 TEST(Errors, ReturnTypeMismatch) {
-  constexpr char kMismatch[] = "def main = \\IO io -> IO 2\n";
   constexpr std::string_view kExpectedError =
       "1:25: Expression type mismatch; found `int` but expected `IO`\n"
       "def main = \\IO io -> IO 2\n"
       "                        ^";
   std::stringstream input;
-  input << kMismatch;
-  lang::Lexer lexer(input);
-  lang::Parser parser(lexer);
-  auto res = parser.Parse();
-  ASSERT_TRUE(res.hasError());
-  ASSERT_EQ(res.getError(), kExpectedError) << res.getError();
+  input << "def main = \\IO io -> IO 2\n";
+  TestParseError(input, kExpectedError);
 }
 
 TEST(Errors, MultipleCallableOverrides) {
@@ -50,11 +53,7 @@ TEST(Errors, MultipleCallableOverrides) {
       "5:1: note: Declared here\n"
       "def writeln = \\IO io GENERIC arg1 GENERIC arg2 -> IO\n"
       "^";
-  lang::Lexer lexer(input);
-  lang::Parser parser(lexer);
-  auto res = parser.Parse();
-  ASSERT_TRUE(res.hasError());
-  ASSERT_EQ(res.getError(), kExpectedError) << res.getError();
+  TestParseError(input, kExpectedError);
 }
 
 TEST(Errors, VariadicMultipleCallableOverrides) {
@@ -69,11 +68,25 @@ TEST(Errors, VariadicMultipleCallableOverrides) {
       "1:1: note: Declared here\n"
       "def writeln = \\IO io GENERIC arg GENERIC arg2 -> IO\n"
       "^";
-  lang::Lexer lexer(input);
-  lang::Parser parser(lexer);
-  auto res = parser.Parse();
-  ASSERT_TRUE(res.hasError());
-  ASSERT_EQ(res.getError(), kExpectedError) << res.getError();
+  TestParseError(input, kExpectedError);
+}
+
+TEST(Errors, NonCompileTimeIdxSet) {
+  constexpr std::string_view kExpectedError =
+      "1:29: Indexing a composite type requires a compile-time constant "
+      "integer";
+  std::stringstream input;
+  input << "def func = \\mut <int> b int x -> <int> SET b x 0";
+  TestParseError(input, kExpectedError);
+}
+
+TEST(Errors, NonCompileTimeIdxGet) {
+  constexpr std::string_view kExpectedError =
+      "1:25: Indexing a composite type requires a compile-time constant "
+      "integer";
+  std::stringstream input;
+  input << "def func = \\<int> b int x -> int GET b x";
+  TestParseError(input, kExpectedError);
 }
 
 }  // namespace

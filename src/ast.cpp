@@ -297,7 +297,9 @@ void Module::AddDeclaration(std::string_view name, Declare &expr) {
   auto &decls = top_level_exprs_[std::string(name)];
   for (Declare *decl : decls) {
     if (expr.getType().isGeneric() == decl->getType().isGeneric())
-      assert(!expr.getType().Matches(decl->getType()));
+      assert(!expr.getType().Matches(decl->getType()) &&
+             "A declaration with this name and type already exist in the "
+             "module. It cannot be re-added.");
     else
       assert(expr.getType() != decl->getType());
   }
@@ -305,6 +307,39 @@ void Module::AddDeclaration(std::string_view name, Declare &expr) {
   ast_.push_back(&expr);
   if (expr.getType().isGeneric())
     generics_.insert(&expr);
+}
+
+Set::Set(const SourceLocation &start, Expr &expr, Expr &idx, Expr &store)
+    : Expr(NK_Set, start, expr.getType()),
+      expr_(expr),
+      idx_(idx),
+      store_(store) {
+  assert(expr.getType().isMutable());
+  assert(expr.getType().isValidGetSetType());
+  assert(idx.getType().isNamedType("int"));
+
+  if (llvm::isa<CompositeType>(getType())) {
+    assert(llvm::isa<Int>(idx) &&
+           "Composite types must be indexed by a constant value");
+  }
+
+  expr.AddUser(*this);
+  idx.AddUser(*this);
+  store.AddUser(*this);
+}
+
+Get::Get(const SourceLocation &start, const Type &type, Expr &expr, Expr &idx)
+    : Expr(NK_Get, start, type), expr_(expr), idx_(idx) {
+  assert(expr.getType().isValidGetSetType());
+  assert(idx.getType().isNamedType("int"));
+
+  if (llvm::isa<CompositeType>(getType())) {
+    assert(llvm::isa<Int>(idx) &&
+           "Composite types must be indexed by a constant value");
+  }
+
+  expr.AddUser(*this);
+  idx.AddUser(*this);
 }
 
 }  // namespace lang

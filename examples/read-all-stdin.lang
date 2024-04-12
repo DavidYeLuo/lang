@@ -1,12 +1,12 @@
 def echo = \IO io -> IO
-  let x = call readc io end
-  let io2 = GET IO x 0
-  let c = GET int x 1
+  let x = readc(io)
+  let io2 = GET x 0
+  let c = GET x 1
   if LT c 0
     io2
   else
-    let io3 = call write io2 CAST char c end
-    call echo io3 end
+    let io3 = write(io2 CAST char c)
+    echo(io3)
 
 def main = \IO io -> IO
-  call echo io end
+  echo(io)

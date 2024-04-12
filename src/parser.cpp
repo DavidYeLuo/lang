@@ -1008,7 +1008,9 @@ Result<Zero *> Parser::ParseZero() {
   return &builder_.getZero(loc, **type_res);
 }
 
+//
 // <composite> ::= "<" <expr>+ ">"
+//
 Result<Composite *> Parser::ParseComposite() {
   SourceLocation loc = lexer_.Peek()->getStart();
   Consume(Token::TK_LAngleBrack);
@@ -1037,7 +1039,7 @@ Result<Composite *> Parser::ParseComposite() {
 //
 // <set> ::= "SET" <expr> <expr> <expr>
 //
-// The first <expr> is the composite type being accessed. The second <expr> is
+// The first <expr> is the aggregate type being accessed. The second <expr> is
 // the index. The third <expr> is the value being stored.
 //
 Result<Set *> Parser::ParseSet() {
@@ -1048,21 +1050,21 @@ Result<Set *> Parser::ParseSet() {
   if (!composite_res)
     return composite_res;
 
-  Expr &composite = **composite_res;
+  Expr &aggregate = **composite_res;
 
-  const Type &type = composite.getType();
+  const Type &type = aggregate.getType();
   if (!type.isValidGetSetType()) {
-    return getErrorDiag() << composite.getStart()
+    return getErrorDiag() << aggregate.getStart()
                           << ": Expression is not a composite or array type"
-                          << DumpLine{composite.getStart()};
+                          << DumpLine{aggregate.getStart()};
   }
 
   if (!type.isMutable()) {
     return getErrorDiag()
            << loc << ": Attempting to SET type that is not marked as mutable"
            << DumpLine{loc} << "\n"
-           << composite.getStart() << ": Expression to SET declared here"
-           << DumpLine{composite.getStart()};
+           << aggregate.getStart() << ": Expression to SET declared here"
+           << DumpLine{aggregate.getStart()};
   }
 
   Result<Expr *> idx_res = ParseExpr();
@@ -1078,6 +1080,13 @@ Result<Set *> Parser::ParseSet() {
            << idx.getType().toString() << "`" << DumpLine{idx.getStart()};
   }
 
+  if (llvm::isa<CompositeType>(aggregate.getType()) && !llvm::isa<Int>(idx)) {
+    return getErrorDiag() << idx.getStart()
+                          << ": Indexing a composite type requires a "
+                             "compile-time constant integer"
+                          << DumpLine{idx.getStart()};
+  }
+
   Result<Expr *> store_val = ParseExpr();
   if (!store_val)
     return store_val;
@@ -1086,63 +1095,55 @@ Result<Set *> Parser::ParseSet() {
   // check that the corresponding type at the idx matches the type of the store
   // value.
 
-  Set &set = builder_.getSet(loc, composite, idx, **store_val);
+  Set &set = builder_.getSet(loc, aggregate, idx, **store_val);
   return &set;
 }
 
 //
-// <get> ::= "GET" <type> <expr> <expr>
+// <get> ::= "GET" <expr> <expr>
 //
 // The <type> is the resulting type of the GET expression. The first <expr> is
 // the composite type that is being accessed. The second <expr> is the index.
 //
 Result<Get *> Parser::ParseGet() {
-  SourceLocation loc = lexer_.Peek()->getStart();
+  SourceLocation loc = lexer_.PeekLoc();
   Consume(Token::TK_GET);
 
-  Result<Token> peek = lexer_.Peek();
-  if (!peek)
-    return peek;
-  SourceLocation typeloc = peek->getStart();
-  Result<const Type *> type_res = ParseType();
-  if (!type_res)
-    return type_res;
-
-  const Type &type = **type_res;
-
-  peek = lexer_.Peek();
-  if (!peek)
-    return peek;
-  SourceLocation exprloc = peek->getStart();
   Result<Expr *> expr = ParseExpr();
   if (!expr)
     return expr;
-  const Type &expr_type = (*expr)->getType();
-  if (!(llvm::isa<CompositeType>(expr_type) ||
-        llvm::isa<ArrayType>(expr_type))) {
-    return getErrorDiag() << exprloc
-                          << ": Expression is not a composite or array type";
+
+  Expr &aggregate = **expr;
+  const Type &agg_type = aggregate.getType();
+
+  if (!agg_type.isValidGetSetType()) {
+    return getErrorDiag() << aggregate.getStart()
+                          << ": Expression is not a composite or array type"
+                          << DumpLine{aggregate.getStart()};
   }
 
-  Result<Token> i = lexer_.Peek();
-  if (!i)
-    return i;
+  Result<Token> idx_peek = lexer_.Peek();
+  if (!idx_peek)
+    return idx_peek;
 
-  if (i->isa(Token::TK_Int)) {
-    const Type *result_type;
-    size_t idx = std::stoi(std::string(i->getChars()));
-    if (const auto *comp_ty = llvm::dyn_cast<CompositeType>(&expr_type)) {
+  const Type *result_type = nullptr;
+
+  if (idx_peek->isa(Token::TK_Int)) {
+    size_t idx = std::stoi(std::string(idx_peek->getChars()));
+    const auto &idx_loc = idx_peek->getStart();
+
+    if (const auto *comp_ty = llvm::dyn_cast<CompositeType>(&agg_type)) {
       if (idx >= comp_ty->getNumTypes()) {
-        return getErrorDiag() << i->getStart() << ": Index " << idx
+        return getErrorDiag() << idx_loc << ": Index " << idx
                               << " exceeds size of composite type which is "
-                              << comp_ty->getNumTypes();
+                              << comp_ty->getNumTypes() << DumpLine{idx_loc};
       }
       result_type = &comp_ty->getTypeAt(idx);
-    } else if (const auto *arr_ty = llvm::dyn_cast<ArrayType>(&expr_type)) {
+    } else if (const auto *arr_ty = llvm::dyn_cast<ArrayType>(&agg_type)) {
       if (idx >= arr_ty->getNumElems()) {
-        return getErrorDiag() << i->getStart() << ": Index " << idx
+        return getErrorDiag() << idx_loc << ": Index " << idx
                               << " exceeds size of array type which is "
-                              << arr_ty->getNumElems();
+                              << arr_ty->getNumElems() << DumpLine{idx_loc};
       }
       result_type = &arr_ty->getElemType();
     } else {
@@ -1150,26 +1151,33 @@ Result<Get *> Parser::ParseGet() {
           "We should've checked if this was either a composite or array type "
           "above.");
     }
-
-    if (!type.CanConvertFrom(*result_type)) {
-      return getErrorDiag()
-             << typeloc << ": GET type mismatch; expected `" << type.toString()
-             << "` but found `" << result_type->toString() << "`"
-             << DumpLine{typeloc};
-    }
   }
 
-  Result<Expr *> idx = ParseExpr();
-  if (!idx)
-    return idx;
-  if (!(*idx)->getType().isNamedType("int")) {
+  Result<Expr *> idxres = ParseExpr();
+  if (!idxres)
+    return idxres;
+  Expr &idx = **idxres;
+
+  if (!idx.getType().isNamedType("int")) {
     return getErrorDiag()
-           << i->getStart()
+           << idx.getStart()
            << ": Expression for index is not type `int`; instead is `"
-           << (*idx)->getType().toString() << "`";
+           << idx.getType().toString() << "`" << DumpLine{idx.getStart()};
   }
 
-  return &builder_.getGet(loc, type, **expr, **idx);
+  if (llvm::isa<CompositeType>(aggregate.getType()) && !llvm::isa<Int>(idx)) {
+    return getErrorDiag() << idx.getStart()
+                          << ": Indexing a composite type requires a "
+                             "compile-time constant integer"
+                          << DumpLine{idx.getStart()};
+  }
+
+  if (!result_type) {
+    const ArrayType &arr_ty = llvm::cast<ArrayType>(agg_type);
+    result_type = &arr_ty.getElemType();
+  }
+
+  return &builder_.getGet(loc, *result_type, aggregate, idx);
 }
 
 // <cast> ::= "CAST" <type> <expr>

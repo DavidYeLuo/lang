@@ -11,12 +11,12 @@ target_compile_options(mangle BEFORE PRIVATE ${LLVM_CONFIG_CXX_FLAGS})
 add_library(ast OBJECT EXCLUDE_FROM_ALL
   ../include/ast.h
   ../include/astbuilder.h
-  ../include/astcloner.h
   ../include/astdumper.h
+  ../include/genericresolver.h
   ast.cpp
   astbuilder.cpp
-  astcloner.cpp
-  astdumper.cpp)
+  astdumper.cpp
+  genericresolver.cpp)
 target_compile_options(ast BEFORE PRIVATE ${LLVM_CONFIG_CXX_FLAGS})
 target_link_libraries(ast lang_interface nodes types mangle)
 
