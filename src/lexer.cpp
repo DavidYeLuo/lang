@@ -34,6 +34,7 @@ const std::map<std::string, Token::TokenKind> kKeywordMap{
     {"OR", Token::TK_OR},
     {"ADD", Token::TK_ADD},
     {"SUB", Token::TK_SUB},
+    {"MUL", Token::TK_MUL},
     {"MOD", Token::TK_MOD},
     {"CAST", Token::TK_CAST},
     {"GET", Token::TK_GET},
