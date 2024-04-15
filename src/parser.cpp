@@ -722,12 +722,8 @@ Result<Expr *> Parser::ParseLet(const Type *hint) {
   if (!res)
     return res;
 
-  if (!res->isa(Token::TK_Identifier)) {
-    return getErrorDiag() << res->getStart()
-                          << ": Expected an identifier but instead found `"
-                          << res->getChars() << "`"
-                          << DumpLine{res->getStart()};
-  }
+  if (!res->isa(Token::TK_Identifier))
+    return getExpectedIdentifierDiag(*res);
 
   std::string_view name(res->getChars());
   if (HasVar(name)) {
@@ -736,14 +732,79 @@ Result<Expr *> Parser::ParseLet(const Type *hint) {
                           << DumpLine{res->getStart()};
   }
 
+  Result<Token> peek = lexer_.Peek();
+  if (!peek)
+    return peek;
+
+  bool comp_unpack = peek->isa(Token::TK_Comma);
+  std::vector<std::string> unpack_ids;
+  std::vector<SourceLocation> id_locs;
+  if (comp_unpack) {
+    unpack_ids.emplace_back(name);
+    id_locs.push_back(res->getStart());
+    Consume(Token::TK_Comma);
+    peek = lexer_.Peek();
+
+    while (peek && !peek->isa(Token::TK_Assign)) {
+      // Expect an identifier.
+      if (!peek->isa(Token::TK_Identifier))
+        return getExpectedIdentifierDiag(*peek);
+      unpack_ids.emplace_back(peek->getChars());
+      id_locs.push_back(peek->getStart());
+      Consume(Token::TK_Identifier);
+
+      peek = lexer_.Peek();
+      if (!peek)
+        return peek;
+      if (peek->isa(Token::TK_Comma)) {
+        Consume(Token::TK_Comma);
+        peek = lexer_.Peek();
+      }
+    }
+
+    if (!peek)
+      return peek;
+  } else if (!peek->isa(Token::TK_Assign)) {
+    return getErrorDiag() << peek->getStart()
+                          << ": Expected an assignment `=`; instead found `"
+                          << peek->getChars() << "`";
+  }
+
   Consume(Token::TK_Assign);
 
   Result<Expr *> expr_res = ParseExpr();
   if (!expr_res)
     return expr_res;
+  Expr &expr = **expr_res;
 
-  Let &let = builder_.getLet(let_loc, name, *expr_res.get());
-  RegisterLocalVar(name, let);
+  if (comp_unpack) {
+    // TODO: It would probably be useful to have this for arrays also.
+    const auto *comp_ty = llvm::dyn_cast<CompositeType>(&expr.getType());
+    if (!comp_ty) {
+      return getErrorDiag()
+             << expr.getStart()
+             << ": Expected a composite type for unpacking; instead found `"
+             << expr.getType().toString() << "`" << DumpLine{expr.getStart()};
+    }
+
+    if (comp_ty->getNumTypes() != unpack_ids.size()) {
+      return getErrorDiag()
+             << let_loc << ": Composite type has " << comp_ty->getNumTypes()
+             << " to unpack; instead found " << unpack_ids.size()
+             << " identifiers" << DumpLine{let_loc};
+    }
+
+    for (size_t i = 0; i < unpack_ids.size(); ++i) {
+      const Type &type = comp_ty->getTypeAt(i);
+      Int &idx = builder_.getInt(expr.getStart(), static_cast<int>(i));
+      Get &get = builder_.getGet(expr.getStart(), type, expr, idx);
+      Let &let = builder_.getLet(id_locs.at(i), unpack_ids.at(i), get);
+      RegisterLocalVar(unpack_ids.at(i), let);
+    }
+  } else {
+    Let &let = builder_.getLet(let_loc, name, expr);
+    RegisterLocalVar(name, let);
+  }
 
   Result<Expr *> body_res = ParseExpr(hint);
   return body_res;

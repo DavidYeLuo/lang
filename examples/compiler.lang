@@ -55,9 +55,7 @@ def any = \bool a GENERIC_REMAINING remaining -> bool
 # - The row of the read character
 # - The col of the read character
 def readc_row_col = \IO io int old_row int old_col -> <IO int int int>
-  let res = readc(io)
-  let c = res[1]
-  let io2 = res[0]
+  let io2, c = readc(io)
   if LT c 0
     <io2 c old_row ADD old_col 1>
   else
@@ -77,11 +75,7 @@ def readc_row_col = \IO io int old_row int old_col -> <IO int int int>
 # - The row of the last read character
 # - The col of the last read character
 def skip_ws = \IO io int old_row int old_col -> <IO int int int>
-  let res = readc_row_col(io old_row old_col)
-  let io2 = res[0]
-  let c = res[1]
-  let row = res[2]
-  let col = res[3]
+  let io2, c, row, col = readc_row_col(io old_row old_col)
   if OR
       EQ c CAST int '\n'
       EQ c CAST int ' '
@@ -104,11 +98,7 @@ def skip_ws = \IO io int old_row int old_col -> <IO int int int>
 # - The col of the last read character
 def __read_token_remaining = \IO io mut [128 x char] buff int idx int old_row int old_col ->
                               <mut [128 x char] IO int int int>
-  let res = readc_row_col(io old_row old_col)
-  let io2 = GET res 0
-  let c = GET res 1
-  let row = GET res 2
-  let col = GET res 3
+  let io2, c, row, col = readc_row_col(io old_row old_col)
   if any(LT c 0
          EQ CAST char c ' '
          EQ CAST char c '\n'
@@ -133,55 +123,47 @@ def __read_token_remaining = \IO io mut [128 x char] buff int idx int old_row in
 # - The col of the last read character
 def __read_string_token = \IO io mut [128 x char] buff int idx int old_row int old_col ->
                                 <mut [128 x char] IO int int int>
-  let next = readc_row_col(io old_row old_col)
-  let next_IO = GET next 0
-  let next_c = GET next 1
-  let row = GET next 2
-  let col = GET next 3
+  let io2, c, row, col = readc_row_col(io old_row old_col)
   if OR
-       LT next_c 0
+       LT c 0
        GE idx 127
-    <buff next_IO next_c row col>
+    <buff io2 c row col>
   else
 
-  if EQ next_c CAST int '"'
-    <buff next_IO next_c row col>
+  if EQ c CAST int '"'
+    <buff io2 c row col>
   else
 
   # Handle character literals starting with `\`.
-  if EQ next_c CAST int '\\'
-    let next_next = readc_row_col(next_IO row col)
-    let next_next_IO = GET next_next 0
-    let next_next_c = GET next_next 1
-    let next_next_row = GET next_next 2
-    let next_next_col = GET next_next 3
+  if EQ c CAST int '\\'
+    let next_IO, next_c, next_row, next_col = readc_row_col(io2 row col)
 
-    if LT next_next_c 0
-      <buff next_next_IO next_next_c next_next_row next_next_col>
+    if LT next_c 0
+      <buff next_IO next_c next_row next_col>
     else
 
     # Handle newline.
-    if EQ CAST char next_next_c 'n'
+    if EQ CAST char next_c 'n'
       __read_string_token(
-        next_next_IO
+        next_IO
         buff[idx]: '\n'
         ADD idx 1
-        next_next_row
-        next_next_col)
+        next_row
+        next_col)
     else
 
     # Handle any other literal.
     __read_string_token(
-      next_next_IO
-      buff[idx]: CAST char next_next_c
+      next_IO
+      buff[idx]: CAST char next_c
       ADD idx 1
-      next_next_row
-      next_next_col)
+      next_row
+      next_col)
   else
 
   __read_string_token(
-    next_IO
-    buff[idx]: CAST char next_c
+    io2
+    buff[idx]: CAST char c
     ADD idx 1
     row
     col)
@@ -214,10 +196,7 @@ def __read_string_token = \IO io int old_row int old_col -> <mut [128 x char] IO
 def skip_comment_line = \IO io int old_row int old_col -> <IO int int int>
   # Note the last read character was a '#'.
   let next = readc_row_col(io old_row old_col)
-  let next_IO = GET next 0
-  let next_c = GET next 1
-  let row = GET next 2
-  let col = GET next 3
+  let next_c = next[1]
 
   if LT next_c 0
     next
@@ -226,7 +205,7 @@ def skip_comment_line = \IO io int old_row int old_col -> <IO int int int>
   if EQ next_c CAST int '\n'
     next
   else
-    skip_comment_line(next_IO row col)
+    skip_comment_line(next[0] next[2] next[3])
 
 # Arguments:
 # - IO
@@ -240,16 +219,12 @@ def skip_comment_line = \IO io int old_row int old_col -> <IO int int int>
 # - The row of the last read character
 # - The col of the last read character
 def read_token = \IO io int old_row int old_col -> <[128 x char] IO int int int>
-  let skipped = skip_ws(io old_row old_col)
-  let skipped_IO = GET skipped 0
-  let last_c = GET skipped 1
-  let row = GET skipped 2
-  let col = GET skipped 3
+  let io2, c, row, col = skip_ws(io old_row old_col)
 
   # Skip comments.
-  if EQ last_c CAST int '#'
+  if EQ c CAST int '#'
     # Consume the whole line.
-    let skip_comment_res = skip_comment_line(skipped_IO row col)
+    let skip_comment_res = skip_comment_line(io2 row col)
     read_token(
       GET skip_comment_res 0
       GET skip_comment_res 2
@@ -259,35 +234,43 @@ def read_token = \IO io int old_row int old_col -> <[128 x char] IO int int int>
   let buff = zero as mut [128 x char]
 
   let res =
-    if LT last_c 0
-      <buff skipped_IO last_c row col>
+    if LT c 0
+      <buff io2 c row col>
     else
 
     # Handle strings.
-    if EQ last_c CAST int '"'
-      __read_string_token(skipped_IO row col)
+    if EQ c CAST int '"'
+      __read_string_token(io2 row col)
     else
 
     # Handle unique single-character tokens.
-    if EQ last_c CAST int '\\'
-      <buff[0]:last_c skipped_IO last_c row col>
+    if EQ c CAST int '\\'
+      <buff[0]:c io2 c row col>
     else
 
     __read_token_remaining(
-      skipped_IO
-      buff[0]: last_c
+      io2
+      buff[0]: c
       1
       row col)
 
-  keep _ = writeln(io "TOKEN: " GET res 0)
-  keep _2 = writeln(io "row: " GET res 3)
-  keep _3 = writeln(io "col: " GET res 4)
+  # TODO: Something that propagates the first argument (or first N arguments)
+  # would be nice so we don't have to do this. Something maybe like:
+  #
+  #   io2 $ writeln("Token: " res[0]) $ writeln("row: " res[3])
+  #       $ writeln("col:" res[4])  # Returns an io
+  #
+  # What this does is insert io2 as the first argument to each of these calls.
+  # If we had something similar to go's class methods, we could also have
+  # something like:
+  #
+  #   io2.writeln("Token: " res[0]).writeln("row: " res[3])
+  #      .writeln("col:" res[4])  # Returns an io
+  keep _ = writeln(io2 "TOKEN: " GET res 0)
+  keep _2 = writeln(io2 "row: " GET res 3)
+  keep _3 = writeln(io2 "col: " GET res 4)
 
-  <GET res 0
-   GET res 1
-   GET res 2
-   GET res 3
-   GET res 4>
+  res
 
 cdecl strcmp = \cptr cptr -> int
 
@@ -320,17 +303,13 @@ def strne = \GENERIC s1 GENERIC s2 -> bool
 # - The row of the last read character
 # - The col of the last read character
 def consume = \IO io GENERIC expected int old_row int old_col -> <IO bool int int>
-  let res = read_token(io old_row old_col)
-  let chars = GET res 0
-  let c = GET res 2
-  let row = GET res 3
-  let col = GET res 4
+  let chars, io2, c, row, col = read_token(io old_row old_col)
   if OR LT c 0 strne(chars expected)
-    <writeln(io old_row ":" old_col ": Error: expected to consume `" expected
+    <writeln(io2 old_row ":" old_col ": Error: expected to consume `" expected
              "` but instead found `" chars "`")
      false row col>
   else
-    <io true row col>
+    <io2 true row col>
 
 # Arguments:
 # - IO
@@ -345,46 +324,39 @@ def consume = \IO io GENERIC expected int old_row int old_col -> <IO bool int in
 # - The row of the last read character
 # - The col of the last read character
 def get_callable_type_named_arg_named_ret = \IO io int old_row int old_col -> <IO [256 x char] [256 x char] [256 x char] int int>
+  let empty = zero as [256 x char]
+
   # Consume `\`.
   let slash_res = consume(io "\\" old_row old_col)
   if not(GET slash_res 1)
     <writeln(io "EXPECTED `\\`")
-     CAST [256 x char] ""
-     CAST [256 x char] ""
-     CAST [256 x char] ""
+     empty empty empty
      0 0>  # We can just return zero here since this is the failing path anyway.
   else
 
   # First named argument type.
-  let type_res = read_token(GET slash_res 0 GET slash_res 2
-                            GET slash_res 3)
+  let type_res = read_token(slash_res[0] slash_res[2] slash_res[3])
   if LT GET type_res 2 0
     <writeln(GET type_res 1 "Couldn't lex first argument type")
-     CAST [256 x char] ""
-     CAST [256 x char] ""
-     CAST [256 x char] ""
+     empty empty empty
      0 0>
   else
-  let type_chars = GET type_res 0
+  let type_chars = type_res[0]
 
   # First argument name.
-  let name_res = read_token(GET type_res 1 GET type_res 3 GET type_res 4)
-  if LT GET name_res 2 0
-    <writeln(GET name_res 1 "Couldn't les first argument name")
-     CAST [256 x char] ""
-     CAST [256 x char] ""
-     CAST [256 x char] ""
+  let name_res = read_token(type_res[1] type_res[3] type_res[4])
+  if LT name_res[2] 0
+    <writeln(name_res[1] "Couldn't les first argument name")
+     empty empty empty
      0 0>
   else
-  let name_chars = GET name_res 0
+  let name_chars = name_res[0]
 
   # Consume `->`.
-  let arrow_res = consume(io "->" GET name_res 3 GET name_res 4)
-  if not(GET arrow_res 1)
+  let arrow_res = consume(io "->" name_res[3] name_res[4])
+  if not(arrow_res[1])
     <writeln(GET arrow_res 0 "EXPECTED `->`")
-     CAST [256 x char] ""
-     CAST [256 x char] ""
-     CAST [256 x char] ""
+     empty empty empty
      0 0>
   else
 
@@ -392,9 +364,7 @@ def get_callable_type_named_arg_named_ret = \IO io int old_row int old_col -> <I
   let ret_res = read_token(GET arrow_res 0 GET arrow_res 2 GET arrow_res 3)
   if LT GET ret_res 2 0
     <writeln(GET type_res 1 "Couldn't lex return type")
-     CAST [256 x char] ""
-     CAST [256 x char] ""
-     CAST [256 x char] ""
+     empty empty empty
      0 0>
   else
   let ret_chars = GET ret_res 0
@@ -717,6 +687,8 @@ def main = \IO io -> IO
 
   keep mod_dump = impurecall LLVMDumpModule compile_def_mod end
 
+  # TODO: Specifically for `keep`s it would be nice to have a "throwaway"
+  # variable name like `_`.
   keep _2 = impurecall LLVMInitializeX86TargetInfo end
   keep _4 = impurecall LLVMInitializeX86Target end
   keep _5 = impurecall LLVMInitializeX86TargetMC end

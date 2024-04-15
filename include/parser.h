@@ -80,7 +80,7 @@ class Parser {
 
   void Consume(Token::TokenKind kind) {
     [[maybe_unused]] auto res = lexer_.Lex();
-    assert(res && res->isa(kind));
+    assert(res && res->isa(kind) && "Incorrect token consumed");
   }
 
   Diagnostic getErrorDiag() const { return Diagnostic(lexer_.getInput()); }
@@ -90,6 +90,18 @@ class Parser {
     Diagnostic diag(getErrorDiag());
     diag << loc << ": Expected a callable type; instead found `"
          << found.toString() << "`";
+    return diag;
+  }
+
+  Diagnostic getExpectedIdentifierDiag(const Token &tok) {
+    return getExpectedIdentifierDiag(tok.getStart(), tok.getChars());
+  }
+
+  Diagnostic getExpectedIdentifierDiag(const SourceLocation &loc,
+                                       std::string_view chars) {
+    Diagnostic diag(getErrorDiag());
+    diag << loc << ": Expected an identifier but instead found `" << chars
+         << "`" << DumpLine{loc};
     return diag;
   }
 
