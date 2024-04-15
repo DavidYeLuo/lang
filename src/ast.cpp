@@ -18,7 +18,7 @@ bool Type::CheckQualifiers(const Type &rhs, QualifierCmp cmp) const {
   __builtin_unreachable();
 }
 
-bool Type::isValidGetSetType() const {
+bool Type::isAggregateType() const {
   return llvm::isa<CompositeType>(this) || llvm::isa<ArrayType>(this) ||
          isGeneric();
 }
@@ -297,7 +297,9 @@ void Module::AddDeclaration(std::string_view name, Declare &expr) {
   auto &decls = top_level_exprs_[std::string(name)];
   for (Declare *decl : decls) {
     if (expr.getType().isGeneric() == decl->getType().isGeneric())
-      assert(!expr.getType().Matches(decl->getType()));
+      assert(!expr.getType().Matches(decl->getType()) &&
+             "A declaration with this name and type already exist in the "
+             "module. It cannot be re-added.");
     else
       assert(expr.getType() != decl->getType());
   }
@@ -305,6 +307,41 @@ void Module::AddDeclaration(std::string_view name, Declare &expr) {
   ast_.push_back(&expr);
   if (expr.getType().isGeneric())
     generics_.insert(&expr);
+}
+
+Set::Set(const SourceLocation &start, Expr &expr, Expr &idx, Expr &store)
+    : Expr(NK_Set, start, expr.getType()),
+      expr_(expr),
+      idx_(idx),
+      store_(store) {
+  assert(expr.getType().isMutable());
+  assert(expr.getType().isAggregateType());
+  assert(idx.getType().isNamedType("int"));
+
+  if (const auto *comp_ty = llvm::dyn_cast<CompositeType>(&getType())) {
+    Int &i = llvm::cast<Int>(idx);
+    assert(comp_ty->getTypeAt(i.getInt()) == store.getType() &&
+           "Store type does not match type type at the index of this composite "
+           "type");
+  }
+
+  expr.AddUser(*this);
+  idx.AddUser(*this);
+  store.AddUser(*this);
+}
+
+Get::Get(const SourceLocation &start, const Type &type, Expr &expr, Expr &idx)
+    : Expr(NK_Get, start, type), expr_(expr), idx_(idx) {
+  assert(expr.getType().isAggregateType());
+  assert(idx.getType().isNamedType("int"));
+
+  if (llvm::isa<CompositeType>(getType())) {
+    assert(llvm::isa<Int>(idx) &&
+           "Composite types must be indexed by a constant value");
+  }
+
+  expr.AddUser(*this);
+  idx.AddUser(*this);
 }
 
 }  // namespace lang

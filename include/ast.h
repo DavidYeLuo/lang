@@ -120,7 +120,7 @@ class Type {
 
   const Type &getReturnType() const;
   bool Matches(const Type &other) const;
-  bool isValidGetSetType() const;
+  bool isAggregateType() const;
 
  protected:
   virtual std::string toStringImpl() const = 0;
@@ -400,18 +400,7 @@ class Composite : public Expr {
 
 class Set : public Expr {
  public:
-  Set(const SourceLocation &start, Expr &expr, Expr &idx, Expr &store)
-      : Expr(NK_Set, start, expr.getType()),
-        expr_(expr),
-        idx_(idx),
-        store_(store) {
-    assert(expr.getType().isMutable());
-    assert(expr.getType().isValidGetSetType());
-    assert(idx.getType().isNamedType("int"));
-    expr.AddUser(*this);
-    idx.AddUser(*this);
-    store.AddUser(*this);
-  }
+  Set(const SourceLocation &start, Expr &expr, Expr &idx, Expr &store);
 
   static bool classof(const Node *node) { return node->getKind() == NK_Set; }
 
@@ -428,13 +417,7 @@ class Set : public Expr {
 
 class Get : public Expr {
  public:
-  Get(const SourceLocation &start, const Type &type, Expr &expr, Expr &idx)
-      : Expr(NK_Get, start, type), expr_(expr), idx_(idx) {
-    assert(expr.getType().isValidGetSetType());
-    assert(idx.getType().isNamedType("int"));
-    expr.AddUser(*this);
-    idx.AddUser(*this);
-  }
+  Get(const SourceLocation &start, const Type &type, Expr &expr, Expr &idx);
 
   static bool classof(const Node *node) { return node->getKind() == NK_Get; }
 
@@ -544,6 +527,7 @@ class Callable : public Expr {
   std::string_view getArgName(size_t i) const { return arg_names_[i]; }
   size_t getNumArgs() const { return arg_names_.size(); }
   const auto &getArgs() const { return args_; }
+  auto &getArgs() { return args_; }
   const Arg &getArg(size_t i) const { return *args_.at(i); }
   Arg &getArg(size_t i) { return *args_.at(i); }
   const Arg &getLastArg() const { return *args_.back(); }

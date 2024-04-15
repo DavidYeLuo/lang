@@ -1,0 +1,25 @@
+decl read_token = \IO int int -> <[128 x char] IO int int int>
+decl strne = \GENERIC GENERIC -> bool
+
+def writeln = \IO io GENERIC s -> IO
+  write(write(io s) "\n")
+
+def writeln = \IO io GENERIC arg GENERIC_REMAINING remaining -> IO
+  let io2 = write(io arg)
+  writeln(io2 remaining)
+
+def consume = \IO io GENERIC expected int old_row int old_col -> <IO bool int int>
+  let res = read_token(io old_row old_col)
+  let chars = GET res 0
+  let c = GET res 2
+  let row = GET res 3
+  let col = GET res 4
+  if OR LT c 0 strne(chars expected)
+    <writeln(io old_row ":" old_col ": Error: expected to consume `" expected
+             "` but instead found `" chars "`")
+     false row col>
+  else
+    <io true row col>
+
+def invoke = \IO io [128 x char] expected -> <IO bool int int>
+  consume(io expected 0 0)

@@ -228,6 +228,15 @@ TEST(E2E, Buffer2) {
   BuildAndCheckOutput(input, kExpected);
 }
 
+TEST(E2E, AltGetSetSyntax) {
+  std::ifstream input(EXAMPLES_DIR "/alt-get-syntax.lang");
+  constexpr char kExpected[] =
+      "abc\n"
+      "xyz\n"
+      "123\n";
+  BuildAndCheckOutput(input, kExpected);
+}
+
 TEST(E2E, PrintChars) {
   std::ifstream input(EXAMPLES_DIR "/composite-type.lang");
   constexpr char kExpected[] =
@@ -334,6 +343,12 @@ TEST(RegressionTests, Regression1) {
                             /*source=*/"",
                             /*optlvl=*/llvm::OptimizationLevel::O0,
                             ADDRESS_SANITIZE_TESTS));
+}
+
+TEST(RegressionTests, Regression2) {
+  std::ifstream input(EXAMPLES_DIR "/regression-test-2.lang");
+  BuildAndCheckOutput(
+      input, ":: Error: expected to consume `aa` but instead found `abc`\n");
 }
 
 TEST(E2E, TypeDeduction) {

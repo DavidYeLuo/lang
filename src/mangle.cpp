@@ -2,6 +2,7 @@
 
 namespace lang {
 
+// TODO: Also account for qualifiers.
 std::string Mangle(const Type &type) {
   switch (type.getKind()) {
     case Type::TK_GenericRemainingType:

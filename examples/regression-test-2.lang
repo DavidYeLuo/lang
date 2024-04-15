@@ -1,0 +1,15 @@
+def writeln = \IO io GENERIC s -> IO
+  write(write(io s) "\n")
+
+def writeln = \IO io GENERIC arg GENERIC_REMAINING remaining -> IO
+  writeln(write(io arg) remaining)
+
+def consume = \IO io [128 x char] chars GENERIC expected -> IO
+  writeln(io ":" ": Error: expected to consume `" expected
+           "` but instead found `" chars "`")
+
+def func = \IO io [128 x char] a -> IO
+  consume(io a "aa")
+
+def main = \IO io -> IO
+  func(io CAST [128 x char] "abc")

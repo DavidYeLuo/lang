@@ -32,8 +32,7 @@ cdecl LLVMCreateTargetMachine = \cptr cptr cptr cptr int int int -> cptr
 cdecl LLVMTargetMachineEmitToFile = \cptr cptr cptr int cptr -> int
 
 def writeln = \IO io GENERIC s -> IO
-  let io2 = call write io s end
-  call write io2 "\n" end
+  write(write(io s) "\n")
 
 def writeln = \IO io GENERIC arg GENERIC_REMAINING remaining -> IO
   let io2 = write(io arg)
@@ -56,9 +55,9 @@ def any = \bool a GENERIC_REMAINING remaining -> bool
 # - The row of the read character
 # - The col of the read character
 def readc_row_col = \IO io int old_row int old_col -> <IO int int int>
-  let res = call readc io end
-  let c = GET int res 1
-  let io2 = GET IO res 0
+  let res = readc(io)
+  let c = res[1]
+  let io2 = res[0]
   if LT c 0
     <io2 c old_row ADD old_col 1>
   else
@@ -78,15 +77,15 @@ def readc_row_col = \IO io int old_row int old_col -> <IO int int int>
 # - The row of the last read character
 # - The col of the last read character
 def skip_ws = \IO io int old_row int old_col -> <IO int int int>
-  let res = call readc_row_col io old_row old_col end
-  let io2 = GET IO res 0
-  let c = GET int res 1
-  let row = GET int res 2
-  let col = GET int res 3
+  let res = readc_row_col(io old_row old_col)
+  let io2 = res[0]
+  let c = res[1]
+  let row = res[2]
+  let col = res[3]
   if OR
       EQ c CAST int '\n'
       EQ c CAST int ' '
-    call skip_ws io2 row col end
+    skip_ws(io2 row col)
   else
     <io2 c row col>
 
@@ -105,21 +104,19 @@ def skip_ws = \IO io int old_row int old_col -> <IO int int int>
 # - The col of the last read character
 def __read_token_remaining = \IO io mut [128 x char] buff int idx int old_row int old_col ->
                               <mut [128 x char] IO int int int>
-  let res = call readc_row_col io old_row old_col end
-  let io2 = GET IO res 0
-  let c = GET int res 1
-  let row = GET int res 2
-  let col = GET int res 3
-  if call any
-       LT c 0
-       EQ CAST char c ' '
-       EQ CAST char c '\n'
-       GE idx 127
-       end
+  let res = readc_row_col(io old_row old_col)
+  let io2 = GET res 0
+  let c = GET res 1
+  let row = GET res 2
+  let col = GET res 3
+  if any(LT c 0
+         EQ CAST char c ' '
+         EQ CAST char c '\n'
+         GE idx 127)
     <buff io2 c row col>
   else
-    let newbuff = SET buff idx CAST char c
-    call __read_token_remaining io2 newbuff ADD idx 1 row col end
+    let newbuff = buff[idx] : CAST char c
+    __read_token_remaining(io2 newbuff ADD idx 1 row col)
 
 # Arguments:
 # - IO
@@ -134,13 +131,13 @@ def __read_token_remaining = \IO io mut [128 x char] buff int idx int old_row in
 # - The last read character
 # - The row of the last read character
 # - The col of the last read character
-def __read_string_token_impl = \IO io mut [128 x char] buff int idx int old_row int old_col ->
+def __read_string_token = \IO io mut [128 x char] buff int idx int old_row int old_col ->
                                 <mut [128 x char] IO int int int>
-  let next = call readc_row_col io old_row old_col end
-  let next_IO = GET IO next 0
-  let next_c = GET int next 1
-  let row = GET int next 2
-  let col = GET int next 3
+  let next = readc_row_col(io old_row old_col)
+  let next_IO = GET next 0
+  let next_c = GET next 1
+  let row = GET next 2
+  let col = GET next 3
   if OR
        LT next_c 0
        GE idx 127
@@ -153,11 +150,11 @@ def __read_string_token_impl = \IO io mut [128 x char] buff int idx int old_row 
 
   # Handle character literals starting with `\`.
   if EQ next_c CAST int '\\'
-    let next_next = call readc_row_col next_IO row col end
-    let next_next_IO = GET IO next_next 0
-    let next_next_c = GET int next_next 1
-    let next_next_row = GET int next_next 2
-    let next_next_col = GET int next_next 3
+    let next_next = readc_row_col(next_IO row col)
+    let next_next_IO = GET next_next 0
+    let next_next_c = GET next_next 1
+    let next_next_row = GET next_next 2
+    let next_next_col = GET next_next 3
 
     if LT next_next_c 0
       <buff next_next_IO next_next_c next_next_row next_next_col>
@@ -165,32 +162,29 @@ def __read_string_token_impl = \IO io mut [128 x char] buff int idx int old_row 
 
     # Handle newline.
     if EQ CAST char next_next_c 'n'
-      call __read_string_token_impl
+      __read_string_token(
         next_next_IO
-        SET buff idx '\n'
+        buff[idx]: '\n'
         ADD idx 1
         next_next_row
-        next_next_col
-        end
+        next_next_col)
     else
 
     # Handle any other literal.
-    call __read_string_token_impl
+    __read_string_token(
       next_next_IO
-      SET buff idx CAST char next_next_c
+      buff[idx]: CAST char next_next_c
       ADD idx 1
       next_next_row
-      next_next_col
-      end
+      next_next_col)
   else
 
-  call __read_string_token_impl
+  __read_string_token(
     next_IO
-    SET buff idx CAST char next_c
+    buff[idx]: CAST char next_c
     ADD idx 1
     row
-    col
-    end
+    col)
 
 # Arguments:
 # - IO
@@ -205,7 +199,7 @@ def __read_string_token_impl = \IO io mut [128 x char] buff int idx int old_row 
 # - The col of the last read character
 def __read_string_token = \IO io int old_row int old_col -> <mut [128 x char] IO int int int>
   let buff = zero as mut [128 x char]
-  call __read_string_token_impl io buff 0 old_row old_col end
+  __read_string_token(io buff 0 old_row old_col)
 
 # Arguments:
 # - IO
@@ -219,11 +213,11 @@ def __read_string_token = \IO io int old_row int old_col -> <mut [128 x char] IO
 # - The col of the last read character
 def skip_comment_line = \IO io int old_row int old_col -> <IO int int int>
   # Note the last read character was a '#'.
-  let next = call readc_row_col io old_row old_col end
-  let next_IO = GET IO next 0
-  let next_c = GET int next 1
-  let row = GET int next 2
-  let col = GET int next 3
+  let next = readc_row_col(io old_row old_col)
+  let next_IO = GET next 0
+  let next_c = GET next 1
+  let row = GET next 2
+  let col = GET next 3
 
   if LT next_c 0
     next
@@ -232,7 +226,7 @@ def skip_comment_line = \IO io int old_row int old_col -> <IO int int int>
   if EQ next_c CAST int '\n'
     next
   else
-    call skip_comment_line next_IO row col end
+    skip_comment_line(next_IO row col)
 
 # Arguments:
 # - IO
@@ -246,21 +240,20 @@ def skip_comment_line = \IO io int old_row int old_col -> <IO int int int>
 # - The row of the last read character
 # - The col of the last read character
 def read_token = \IO io int old_row int old_col -> <[128 x char] IO int int int>
-  let skipped = call skip_ws io old_row old_col end
-  let skipped_IO = GET IO skipped 0
-  let last_c = GET int skipped 1
-  let row = GET int skipped 2
-  let col = GET int skipped 3
+  let skipped = skip_ws(io old_row old_col)
+  let skipped_IO = GET skipped 0
+  let last_c = GET skipped 1
+  let row = GET skipped 2
+  let col = GET skipped 3
 
   # Skip comments.
   if EQ last_c CAST int '#'
     # Consume the whole line.
-    let skip_comment_res = call skip_comment_line skipped_IO row col end
-    call read_token
-      GET IO skip_comment_res 0
-      GET int skip_comment_res 2
-      GET int skip_comment_res 3
-      end
+    let skip_comment_res = skip_comment_line(skipped_IO row col)
+    read_token(
+      GET skip_comment_res 0
+      GET skip_comment_res 2
+      GET skip_comment_res 3)
   else
 
   let buff = zero as mut [128 x char]
@@ -272,43 +265,48 @@ def read_token = \IO io int old_row int old_col -> <[128 x char] IO int int int>
 
     # Handle strings.
     if EQ last_c CAST int '"'
-      call __read_string_token skipped_IO row col end
+      __read_string_token(skipped_IO row col)
     else
 
     # Handle unique single-character tokens.
     if EQ last_c CAST int '\\'
-      <SET buff 0 last_c skipped_IO last_c row col>
+      <buff[0]:last_c skipped_IO last_c row col>
     else
 
-    call __read_token_remaining
+    __read_token_remaining(
       skipped_IO
-      SET buff 0 last_c
+      buff[0]: last_c
       1
-      row col
-      end
+      row col)
 
-  keep _ = call writeln io "TOKEN: " GET [128 x char] res 0 end
-  keep _2 = call writeln io "row: " GET int res 3 end
-  keep _3 = call writeln io "col: " GET int res 4 end
+  keep _ = writeln(io "TOKEN: " GET res 0)
+  keep _2 = writeln(io "row: " GET res 3)
+  keep _3 = writeln(io "col: " GET res 4)
 
-  <GET [128 x char] res 0
-   GET IO res 1
-   GET int res 2
-   GET int res 3
-   GET int res 4>
+  <GET res 0
+   GET res 1
+   GET res 2
+   GET res 3
+   GET res 4>
 
-cdecl strcmp = \[256 x char] [256 x char] -> int
+cdecl strcmp = \cptr cptr -> int
 
-def streq = \[256 x char] s1 [256 x char] s2 -> bool
-  let res = call strcmp s1 s2 end
-  EQ res 0
+# FIXME: We should have a way of reporting an error for this code:
+# 
+#   def streq = \GENERIC s1 GENERIC s2 -> bool
+#     EQ strcmp(s1 s2) 0
+#
+# The potential error is when s1 and s2 don't match the actual arg types
+# for strcmp. Right now, we crash in an assertion failure during lowering.
+
+def streq = \GENERIC s1 GENERIC s2 -> bool
+  EQ strcmp(CAST cptr s1 CAST cptr s2) 0
 
 def not = \bool b -> bool
   if b false else true
 
-def strne = \[256 x char] s1 [256 x char] s2 -> bool
-  let res = call strcmp s1 s2 end
-  call not EQ res 0 end
+def strne = \GENERIC s1 GENERIC s2 -> bool
+  not(EQ strcmp(CAST cptr s1 CAST cptr s2) 0)
 
 # Arguments:
 # - IO
@@ -321,23 +319,15 @@ def strne = \[256 x char] s1 [256 x char] s2 -> bool
 # - True if we consumed the correct tokens; false if failed.
 # - The row of the last read character
 # - The col of the last read character
-def consume = \IO io [256 x char] expected int old_row int old_col -> <IO bool int int>
-  let res = call read_token io old_row old_col end
-  let chars = GET [128 x char] res 0
-  let c = GET int res 2
-  let row = GET int res 3
-  let col = GET int res 4
-  if OR LT c 0 call strne CAST [256 x char] chars expected end
-    <call writeln io
-      old_row
-      CAST [256 x char] ":"
-      old_col
-      CAST [256 x char] ": Error: expected to consume `"
-      expected
-      CAST [256 x char] "` but instead found `"
-      CAST [256 x char] chars
-      CAST [256 x char] "`"
-      end
+def consume = \IO io GENERIC expected int old_row int old_col -> <IO bool int int>
+  let res = read_token(io old_row old_col)
+  let chars = GET res 0
+  let c = GET res 2
+  let row = GET res 3
+  let col = GET res 4
+  if OR LT c 0 strne(chars expected)
+    <writeln(io old_row ":" old_col ": Error: expected to consume `" expected
+             "` but instead found `" chars "`")
      false row col>
   else
     <io true row col>
@@ -356,9 +346,9 @@ def consume = \IO io [256 x char] expected int old_row int old_col -> <IO bool i
 # - The col of the last read character
 def get_callable_type_named_arg_named_ret = \IO io int old_row int old_col -> <IO [256 x char] [256 x char] [256 x char] int int>
   # Consume `\`.
-  let slash_res = call consume io CAST [256 x char] "\\" old_row old_col end
-  if call not GET bool slash_res 1 end
-    <call writeln io "EXPECTED `\\`" end
+  let slash_res = consume(io "\\" old_row old_col)
+  if not(GET slash_res 1)
+    <writeln(io "EXPECTED `\\`")
      CAST [256 x char] ""
      CAST [256 x char] ""
      CAST [256 x char] ""
@@ -366,31 +356,32 @@ def get_callable_type_named_arg_named_ret = \IO io int old_row int old_col -> <I
   else
 
   # First named argument type.
-  let type_res = call read_token GET IO slash_res 0 GET int slash_res 2 GET int slash_res 3 end
-  if LT GET int type_res 2 0
-    <call writeln GET IO type_res 1 "Couldn't lex first argument type" end
+  let type_res = read_token(GET slash_res 0 GET slash_res 2
+                            GET slash_res 3)
+  if LT GET type_res 2 0
+    <writeln(GET type_res 1 "Couldn't lex first argument type")
      CAST [256 x char] ""
      CAST [256 x char] ""
      CAST [256 x char] ""
      0 0>
   else
-  let type_chars = GET [128 x char] type_res 0
+  let type_chars = GET type_res 0
 
   # First argument name.
-  let name_res = call read_token GET IO type_res 1 GET int type_res 3 GET int type_res 4 end
-  if LT GET int name_res 2 0
-    <call writeln GET IO name_res 1 "Couldn't les first argument name" end
+  let name_res = read_token(GET type_res 1 GET type_res 3 GET type_res 4)
+  if LT GET name_res 2 0
+    <writeln(GET name_res 1 "Couldn't les first argument name")
      CAST [256 x char] ""
      CAST [256 x char] ""
      CAST [256 x char] ""
      0 0>
   else
-  let name_chars = GET [128 x char] name_res 0
+  let name_chars = GET name_res 0
 
   # Consume `->`.
-  let arrow_res = call consume io CAST [256 x char] "->" GET int name_res 3 GET int name_res 4 end
-  if call not GET bool arrow_res 1 end
-    <call writeln GET IO arrow_res 0 "EXPECTED `->`" end
+  let arrow_res = consume(io "->" GET name_res 3 GET name_res 4)
+  if not(GET arrow_res 1)
+    <writeln(GET arrow_res 0 "EXPECTED `->`")
      CAST [256 x char] ""
      CAST [256 x char] ""
      CAST [256 x char] ""
@@ -398,29 +389,29 @@ def get_callable_type_named_arg_named_ret = \IO io int old_row int old_col -> <I
   else
 
   # Named return type.
-  let ret_res = call read_token GET IO arrow_res 0 GET int arrow_res 2 GET int arrow_res 3 end
-  if LT GET int ret_res 2 0
-    <call writeln GET IO type_res 1 "Couldn't lex return type" end
+  let ret_res = read_token(GET arrow_res 0 GET arrow_res 2 GET arrow_res 3)
+  if LT GET ret_res 2 0
+    <writeln(GET type_res 1 "Couldn't lex return type")
      CAST [256 x char] ""
      CAST [256 x char] ""
      CAST [256 x char] ""
      0 0>
   else
-  let ret_chars = GET [128 x char] ret_res 0
+  let ret_chars = GET ret_res 0
 
-  <GET IO ret_res 1
+  <GET ret_res 1
    CAST [256 x char] type_chars
    CAST [256 x char] name_chars
    CAST [256 x char] ret_chars
-   GET int ret_res 3
-   GET int ret_res 4>
+   GET ret_res 3
+   GET ret_res 4>
 
 def get_str_type = \ -> cptr
   let char_type = impurecall LLVMInt8Type end
   impurecall LLVMPointerType char_type 0 end
 
 def get_printf_type = \ -> cptr
-  let printf_param_types = <call get_str_type end>
+  let printf_param_types = <get_str_type()>
   impurecall LLVMFunctionType
     impurecall LLVMInt32Type end
     CAST cptr printf_param_types
@@ -429,7 +420,7 @@ def get_printf_type = \ -> cptr
     end
 
 def get_printf_func = \cptr mod -> cptr
-  let printf_func = call LLVMGetNamedFunction mod CAST cptr "printf" end
+  let printf_func = LLVMGetNamedFunction(mod CAST cptr "printf")
   if CAST bool printf_func
     printf_func
   else
@@ -446,12 +437,12 @@ def get_write_str_type = \ -> cptr
     end
 
 def get_write_str_func = \cptr mod -> cptr
-  let write_str_func = call LLVMGetNamedFunction mod CAST cptr "write_str" end
+  let write_str_func = LLVMGetNamedFunction(mod CAST cptr "write_str")
   if CAST bool write_str_func
     write_str_func
   else
 
-  let printf_func = call get_printf_func mod end
+  let printf_func = get_printf_func(mod)
 
   # Create the write_str function which just dispatches to printf.
   let write_str_type = impurecall get_write_str_type end
@@ -492,35 +483,34 @@ def compile_write_call = \IO io cptr func cptr builder cptr mod int old_row int 
   # NOTE: The `call` and `write` tokens have been popped at this point.
   # Parse the first argument.
   # For now let's assume it's just a variable.
-  let io_res = call read_token io old_row old_col end
-  let io_io = GET IO io_res 1
-  if LT GET int io_res 2 0
-    <call writeln io_io "Unable to get token for IO type in first argument to write call" end
+  let io_res = read_token(io old_row old_col)
+  let io_io = GET io_res 1
+  if LT GET io_res 2 0
+    <writeln(io_io "Unable to get token for IO type in first argument to write call")
      CAST cptr 0
      0
      0>
   else
-  let io_chars = GET [128 x char] io_res 0
+  let io_chars = GET io_res 0
 
   # Now parse the second argument.
   # For now let's assume it's just a string literal.
-  let str_res = call read_token io_io GET int io_res 3 GET int io_res 4 end
-  let str_io = GET IO str_res 1
-  if LT GET int str_res 2 0
-    <call writeln
+  let str_res = read_token(io_io GET io_res 3 GET io_res 4)
+  let str_io = GET str_res 1
+  if LT GET str_res 2 0
+    <writeln(
        str_io
-       "Unable to get token for [256 x char] type in second argument to write call"
-       end
+       "Unable to get token for [256 x char] type in second argument to write call")
      CAST cptr 0
      0
      0>
   else
-  let str_chars = GET [128 x char] str_res 0
+  let str_chars = GET str_res 0
 
   # Now consume the `end`.
-  let end_res = call consume io CAST [256 x char] "end" GET int str_res 3 GET int str_res 4 end
-  if call not GET bool end_res 1 end
-    <call writeln io "EXPECTED `end` at end of write call" end
+  let end_res = consume(io "end" GET str_res 3 GET str_res 4)
+  if not(GET end_res 1)
+    <writeln(io "EXPECTED `end` at end of write call")
      CAST cptr 0
      0
      0>
@@ -528,7 +518,7 @@ def compile_write_call = \IO io cptr func cptr builder cptr mod int old_row int 
 
   keep write_str = impurecall get_write_str_func mod end
 
-  let str = call LLVMBuildGlobalStringPtr builder CAST cptr str_chars CAST cptr "str_literal" end
+  let str = LLVMBuildGlobalStringPtr(builder CAST cptr str_chars CAST cptr "str_literal")
 
   # FIXME: We should make a mapping from the names to the arguments.
   let func_args =
@@ -547,7 +537,7 @@ def compile_write_call = \IO io cptr func cptr builder cptr mod int old_row int 
     CAST cptr "write_str_res"
     end
 
-  <GET IO end_res 0 ir_call GET int end_res 2 GET int end_res 3>
+  <GET end_res 0 ir_call GET end_res 2 GET end_res 3>
 
 # Arguments:
 # - IO
@@ -565,23 +555,24 @@ def compile_write_call = \IO io cptr func cptr builder cptr mod int old_row int 
 def compile_call = \IO io cptr func cptr builder cptr mod int old_row int old_col -> <IO cptr int int>
   # NOTE: The `call` token has been popped at this point.
   # Get the next token denoting the callable.
-  let callable_res = call read_token io old_row old_col end
-  if LT GET int callable_res 2 0
-    <call writeln GET IO callable_res 1 "Unable to get token for callable for call" end
+  let callable_res = read_token(io old_row old_col)
+  if LT GET callable_res 2 0
+    <writeln(GET callable_res 1 "Unable to get token for callable for call")
      CAST cptr 0
      0
      0>
   else
-  let callable_chars = GET [128 x char] callable_res 0
+  let callable_chars = GET callable_res 0
 
-  if call streq CAST [256 x char] callable_chars CAST [256 x char] "write" end
-    call compile_write_call GET IO callable_res 1 func builder mod GET int callable_res 3 GET int callable_res 4 end
+  if streq(callable_chars "write")
+    compile_write_call(GET callable_res 1 func builder mod
+                       GET callable_res 3
+                       GET callable_res 4)
   else
-    <call writeln
-       GET IO callable_res 1
+    <writeln(
+       GET callable_res 1
        "Unable to handle token for callable in call: "
-       callable_chars
-       end
+       callable_chars)
      CAST cptr 0
      0
      0>
@@ -601,26 +592,25 @@ def compile_call = \IO io cptr func cptr builder cptr mod int old_row int old_co
 # - The col of the last read char
 def compile_expr = \IO io cptr func cptr builder cptr mod int old_row int old_col -> <IO cptr int int>
   # Get the next token denoting the expression.
-  let expr_res = call read_token io old_row old_col end
-  if LT GET int expr_res 2 0
-    <call writeln io "Couldn't get next token for compiling an expression" end
+  let expr_res = read_token(io old_row old_col)
+  if LT GET expr_res 2 0
+    <writeln(io "Couldn't get next token for compiling an expression")
      CAST cptr 0
      0
      0>
   else
-  let expr_chars = GET [128 x char] expr_res 0
+  let expr_chars = GET expr_res 0
 
-  if call streq CAST [256 x char] expr_chars CAST [256 x char] "call" end
-    call compile_call GET IO expr_res 1 func builder mod GET int expr_res 3 GET int expr_res 4 end
+  if streq(expr_chars "call")
+    compile_call(GET expr_res 1 func builder mod GET expr_res 3 GET expr_res 4)
   else
-    <call writeln
-       GET IO expr_res 1
-       GET int expr_res 3
-       CAST [256 x char] ":"
-       GET int expr_res 4
-       CAST [256 x char] ": Error: Unable to parse expression: "
-       CAST [256 x char] expr_chars
-       end
+    <writeln(
+       GET expr_res 1
+       GET expr_res 3
+       ":"
+       GET expr_res 4
+       ": Error: Unable to parse expression: "
+       expr_chars)
      CAST cptr 0
      0
      0>
@@ -638,45 +628,44 @@ def compile_expr = \IO io cptr func cptr builder cptr mod int old_row int old_co
 # - The col of the last read char
 def compile_def = \IO io cptr mod int old_row int old_col -> <IO cptr int int>
   # Consume `def`.
-  let def_res = call consume io CAST [256 x char] "def" old_row old_col end
-  if call not GET bool def_res 1 end
-    <GET IO def_res 0 CAST cptr 0 0 0>
+  let def_res = consume(io "def" old_row old_col)
+  if not(GET def_res 1)
+    <GET def_res 0 CAST cptr 0 0 0>
   else
 
   # Get the name.
-  let name_res = call read_token GET IO def_res 0 GET int def_res 2 GET int def_res 3 end
-  if LT GET int name_res 2 0
-    <call writeln io "MISSING NAME" end CAST cptr 0 0 0>
+  let name_res = read_token(GET def_res 0 GET def_res 2 GET def_res 3)
+  if LT GET name_res 2 0
+    <writeln(io "MISSING NAME") CAST cptr 0 0 0>
   else
-  let name_chars = GET [128 x char] name_res 0
+  let name_chars = GET name_res 0
 
   # Consume `=`.
-  let eq_res = call consume io CAST [256 x char] "=" GET int name_res 3 GET int name_res 4 end
-  if call not GET bool eq_res 1 end
-    <call writeln io "EXPECTED `=`" end CAST cptr 0 0 0>
+  let eq_res = consume(io "=" GET name_res 3 GET name_res 4)
+  if not(GET eq_res 1)
+    <writeln(io "EXPECTED `=`") CAST cptr 0 0 0>
   else
 
   # Get the type, which is just a callable with a single named type argument
   # and named return type.
   let type_res =
-    call get_callable_type_named_arg_named_ret
-      GET IO eq_res 0
-      GET int eq_res 2
-      GET int eq_res 3
-      end
-  if call streq GET [256 x char] type_res 1 CAST [256 x char] "" end
-    <call writeln io "Couldn't parse callable type" end CAST cptr 0 0 0>
+    get_callable_type_named_arg_named_ret(
+      GET eq_res 0
+      GET eq_res 2
+      GET eq_res 3)
+  if streq(GET type_res 1 "")
+    <writeln(io "Couldn't parse callable type") CAST cptr 0 0 0>
   else
 
   # Lower IO types to i32.
-  let first_param_type = GET [256 x char] type_res 1
-  if call strne CAST [256 x char] "IO" first_param_type end
-    <call writeln io "Unknown type " first_param_type end CAST cptr 0 0 0>
+  let first_param_type = GET type_res 1
+  if strne("IO" first_param_type)
+    <writeln(io "Unknown type " first_param_type) CAST cptr 0 0 0>
   else
 
-  let return_type = GET [256 x char] type_res 3
-  if call strne CAST [256 x char] "IO" return_type end
-    <call writeln io "Unknown type " return_type end CAST cptr 0 0 0>
+  let return_type = GET type_res 3
+  if strne("IO" return_type)
+    <writeln(io "Unknown type " return_type) CAST cptr 0 0 0>
   else
 
   # Create the function.
@@ -695,37 +684,36 @@ def compile_def = \IO io cptr mod int old_row int old_col -> <IO cptr int int>
   # Set argument names.
   keep set_arg_name = impurecall LLVMSetValueName
     impurecall LLVMGetParam func 0 end
-    CAST cptr GET [256 x char] type_res 2
+    CAST cptr GET type_res 2
     end
 
   # Get the next token denoting the expression.
-  let res = call compile_expr io func builder mod GET int type_res 4 GET int type_res 5 end
-  if call not CAST bool GET cptr res 1 end
-    <GET IO res 0 CAST cptr 0 0 0>
+  let res = compile_expr(io func builder mod GET type_res 4 GET type_res 5)
+  if not(CAST bool GET res 1)
+    <GET res 0 CAST cptr 0 0 0>
   else
 
-  keep ret = impurecall LLVMBuildRet builder GET cptr res 1 end
+  keep ret = impurecall LLVMBuildRet builder GET res 1 end
 
-  <GET IO res 0 mod GET int res 2 GET int res 3>
+  <GET res 0 mod GET res 2 GET res 3>
 
 cdecl printf = \cptr cptr -> int
 
-def main = \IO io_ -> IO
+def main = \IO io -> IO
   let mod = impurecall LLVMModuleCreateWithName CAST cptr "my_module" end
 
-  let compile_def_res = call compile_def io_ mod 1 1 end
-  let compile_def_IO = GET IO compile_def_res 0
-  let compile_def_mod = GET cptr compile_def_res 1
-  if call not CAST bool GET cptr compile_def_res 1 end
+  let compile_def_res = compile_def(io mod 1 1)
+  let compile_def_IO = GET compile_def_res 0
+  let compile_def_mod = GET compile_def_res 1
+  if not(CAST bool GET compile_def_res 1)
     compile_def_IO
   else
 
   let verify_failed = impurecall LLVMVerifyModule compile_def_mod 0 CAST cptr 0 end
-  let verify_failed_io = call writeln
+  let verify_failed_io = writeln(
     compile_def_IO
     "verify module failed: "
-    verify_failed
-    end
+    verify_failed)
 
   keep mod_dump = impurecall LLVMDumpModule compile_def_mod end
 
@@ -735,21 +723,21 @@ def main = \IO io_ -> IO
   keep _6 = impurecall LLVMInitializeX86AsmParser end
   keep _7 = impurecall LLVMInitializeX86AsmPrinter end
 
-  keep triple = call LLVMGetDefaultTargetTriple end
+  keep triple = LLVMGetDefaultTargetTriple()
   keep target = <CAST cptr 0>
   keep _3 = impurecall LLVMGetTargetFromTriple triple target CAST cptr 0 end
-  keep cpu = call LLVMGetHostCPUName end
-  keep features = call LLVMGetHostCPUFeatures end
+  keep cpu = LLVMGetHostCPUName()
+  keep features = LLVMGetHostCPUFeatures()
 
   keep triple_printf_res = impurecall printf CAST cptr "triple: %s\n" triple end
 
-  keep io__4 = call write verify_failed_io "target: " end
-  keep io__5 = call writeln io__4 GET cptr target 0 end
-  keep io__8 = call printf CAST cptr "cpu: %s\n" cpu end
-  keep printf_num_chars = call printf CAST cptr "features: %s\n" features end
+  keep io__4 = write(verify_failed_io "target: ")
+  keep io__5 = writeln(io__4 GET target 0)
+  keep io__8 = printf(CAST cptr "cpu: %s\n" cpu)
+  keep printf_num_chars = printf(CAST cptr "features: %s\n" features)
 
   keep target_machine = impurecall LLVMCreateTargetMachine
-    GET cptr target 0
+    GET target 0
     triple
     cpu
     features
@@ -758,16 +746,14 @@ def main = \IO io_ -> IO
     0
     end
 
-  let io___11 = call write io__5 "target_machine: " end
-  let io___12 = call write io___11 target_machine end
-  let io___13 = call write io___12 "\n" end
+  let io___13 = writeln(io__5 "target_machine: " target_machine)
 
   keep failed_to_write =
-    call LLVMTargetMachineEmitToFile target_machine mod CAST cptr "add.obj" 1 CAST cptr 0 end
+    LLVMTargetMachineEmitToFile(target_machine mod CAST cptr "add.obj" 1 CAST cptr 0)
   keep failed_to_write_io =
-    call writeln io___13 "failed to write add.obj: " failed_to_write end
+    writeln(io___13 "failed to write add.obj: " failed_to_write)
 
-  let err_buff = zero as [1024 x char]
+  let err_buff = zero as mut [1024 x char]
   let err_buff_ptr = <CAST cptr err_buff>
 
   keep failed_to_write_obj = impurecall LLVMTargetMachineEmitToFile
@@ -777,4 +763,4 @@ def main = \IO io_ -> IO
     1
     CAST cptr err_buff_ptr
     end
-  call writeln failed_to_write_io "failed to write obj.obj: " failed_to_write_obj end
+  writeln(failed_to_write_io "failed to write obj.obj: " failed_to_write_obj)

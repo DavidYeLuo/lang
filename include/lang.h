@@ -35,8 +35,13 @@ class SourceLocation {
   void setRow(pos_t row) { row_ = row; }
   void setCol(pos_t col) { col_ = col; }
   void setPositionIndicator(std::istream::pos_type pos) { pos_ = pos; }
+  void setEof() { pos_ = eof(); }
 
   bool isValid() const { return row_ && col_; }
+
+  static std::istream::pos_type eof() {
+    return static_cast<std::istream::pos_type>(-1);
+  }
 
  private:
   pos_t row_, col_;
@@ -75,7 +80,7 @@ struct DumpLine {
 
 class Diagnostic {
  public:
-  Diagnostic(std::istream &input) : input_(input) {}
+  Diagnostic(std::istream &input) : input_(input) { assert(input_); }
 
   Diagnostic(Diagnostic &&other) = default;
 
