@@ -42,6 +42,14 @@ const std::map<std::string, Token::TokenKind> kKeywordMap{
     {"GENERIC_REMAINING", Token::TK_GENERIC_REMAINING},
 };
 
+const std::map<char, Token::TokenKind> kSimpleCharsMap{
+    {'\\', Token::TK_Lambda},     {'=', Token::TK_Assign},
+    {',', Token::TK_Comma},       {':', Token::TK_Colon},
+    {'<', Token::TK_LAngleBrack}, {'>', Token::TK_RAngleBrack},
+    {'[', Token::TK_LSqBrack},    {']', Token::TK_RSqBrack},
+    {'(', Token::TK_LParen},      {')', Token::TK_RParen},
+};
+
 }  // namespace
 
 int Lexer::getNextChar() {
@@ -137,35 +145,14 @@ Result<Token> Lexer::LexImpl() {
           : (input_.tellg() + static_cast<std::istream::off_type>(1));
   assert(input_);
 
+  auto found_char = kSimpleCharsMap.find(static_cast<char>(ch));
+  if (found_char != kSimpleCharsMap.end())
+    return Result<Token>(found_char->second, start,
+                         SourceLocation(row_, col_ + 1, next_pos),
+                         static_cast<char>(ch));
+
   // TODO: Most of these can be in a char map.
   switch (ch) {
-    case '\\':
-      return Result<Token>(Token::TK_Lambda, start,
-                           SourceLocation(row_, col_ + 1, next_pos), "\\");
-    case '=':
-      return Result<Token>(Token::TK_Assign, start,
-                           SourceLocation(row_, col_ + 1, next_pos), "=");
-    case ':':
-      return Result<Token>(Token::TK_Colon, start,
-                           SourceLocation(row_, col_ + 1, next_pos), ":");
-    case '<':
-      return Result<Token>(Token::TK_LAngleBrack, start,
-                           SourceLocation(row_, col_ + 1, next_pos), "<");
-    case '>':
-      return Result<Token>(Token::TK_RAngleBrack, start,
-                           SourceLocation(row_, col_ + 1, next_pos), ">");
-    case '[':
-      return Result<Token>(Token::TK_LSqBrack, start,
-                           SourceLocation(row_, col_ + 1, next_pos), "[");
-    case ']':
-      return Result<Token>(Token::TK_RSqBrack, start,
-                           SourceLocation(row_, col_ + 1, next_pos), "]");
-    case '(':
-      return Result<Token>(Token::TK_LParen, start,
-                           SourceLocation(row_, col_ + 1, next_pos), "(");
-    case ')':
-      return Result<Token>(Token::TK_RParen, start,
-                           SourceLocation(row_, col_ + 1, next_pos), ")");
     case '-': {
       int next = getNextChar();
       if (next != '>')

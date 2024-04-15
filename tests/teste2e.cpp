@@ -269,6 +269,38 @@ TEST(E2E, PrintChars) {
   BuildAndCheckOutput(input, kExpected);
 }
 
+TEST(E2E, CompositeUnpack) {
+  std::ifstream input(EXAMPLES_DIR "/composite-unpack.lang");
+  constexpr char kExpected[] =
+      "97 a A\n"
+      "98 b B\n"
+      "99 c C\n"
+      "100 d D\n"
+      "101 e E\n"
+      "102 f F\n"
+      "103 g G\n"
+      "104 h H\n"
+      "105 i I\n"
+      "106 j J\n"
+      "107 k K\n"
+      "108 l L\n"
+      "109 m M\n"
+      "110 n N\n"
+      "111 o O\n"
+      "112 p P\n"
+      "113 q Q\n"
+      "114 r R\n"
+      "115 s S\n"
+      "116 t T\n"
+      "117 u U\n"
+      "118 v V\n"
+      "119 w W\n"
+      "120 x X\n"
+      "121 y Y\n"
+      "122 z Z\n";
+  BuildAndCheckOutput(input, kExpected);
+}
+
 TEST(E2E, CharsArrayStr) {
   std::ifstream input(EXAMPLES_DIR "/char-array-str.lang");
   BuildAndCheckOutput(input, "abc\n");

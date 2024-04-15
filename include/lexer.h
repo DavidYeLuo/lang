@@ -34,6 +34,7 @@ class Token {
     TK_Zero,
     TK_As,
     TK_Mut,
+    TK_Comma,        // ,
     TK_Colon,        // :
     TK_LAngleBrack,  // <
     TK_RAngleBrack,  // >
@@ -57,12 +58,15 @@ class Token {
     TK_EOF,
   };
 
-  Token(TokenKind kind, SourceLocation start, SourceLocation end,
+  Token(TokenKind kind, const SourceLocation &start, const SourceLocation &end,
         std::string_view chars)
       : kind_(kind), start_(start), end_(end), chars_(chars) {}
+  Token(TokenKind kind, const SourceLocation &start, const SourceLocation &end,
+        char c)
+      : kind_(kind), start_(start), end_(end), chars_(1, c) {}
 
-  SourceLocation getStart() const { return start_; }
-  SourceLocation getEnd() const { return end_; }
+  const SourceLocation &getStart() const { return start_; }
+  const SourceLocation &getEnd() const { return end_; }
   TokenKind getKind() const { return kind_; }
   std::string_view getChars() const { return chars_; }
 

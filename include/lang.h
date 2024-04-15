@@ -95,6 +95,8 @@ class Diagnostic {
     return *this;
   }
 
+  // TODO: We should probably truncate the output to ensure we don't flood the
+  // string with a lot of text.
   std::string get() { return ss_.str(); }
 
  private:

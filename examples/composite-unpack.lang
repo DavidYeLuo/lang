@@ -1,0 +1,25 @@
+def unwrap = \char c -> <int char char>
+  <CAST int c c ADD SUB c 'a' 'A'>
+
+def write = \IO io GENERIC arg GENERIC_REMAINING rem -> IO
+  write(write(io arg) rem)
+
+def func = \IO io char c char last -> IO
+  if LT last c
+    io
+  else
+    # This is functionally equivalent to:
+    #
+    #   let res = unwrap(c)
+    #   let i = res[0]
+    #   let lower = res[1]
+    #   let upper = res[2]
+    #
+    # TODO: It would probably be useful to have this for arrays also.
+    let i, lower, upper = unwrap(c)
+
+    let io2 = write(io i " " lower " " upper "\n")
+    func(io2 ADD c CAST char 1 last)
+
+def main = \IO io -> IO
+  func(io 'a' 'z')
