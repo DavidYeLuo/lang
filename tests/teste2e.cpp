@@ -416,4 +416,12 @@ TEST(E2E, VariadicArgsOldCallSyntax) {
   BuildAndCheckOutput(input, kExpected);
 }
 
+TEST(E2E, MethodSyntax) {
+  std::ifstream input(EXAMPLES_DIR "/methods.lang");
+  constexpr char kExpected[] =
+      "abcd\n"
+      "brand new line\n";
+  BuildAndCheckOutput(input, kExpected);
+}
+
 }  // namespace

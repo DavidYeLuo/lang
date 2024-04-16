@@ -69,7 +69,13 @@ class Parser {
   };
   Result<CallableResults> ParseCallableFromArgs(
       const SourceLocation &call_loc, std::string_view name,
-      Token::TokenKind end_tok, const Type *return_type_hint = nullptr);
+      const std::vector<Expr *> &parsed_args, Token::TokenKind end_tok,
+      const Type *return_type_hint = nullptr);
+  Result<Expr *> ParseCallFromArgs(const SourceLocation &call_loc,
+                                   std::string_view name,
+                                   const std::vector<Expr *> &parsed_args,
+                                   Token::TokenKind end_tok,
+                                   const Type *return_type_hint = nullptr);
   Result<Call *> getAndCheckCall(const SourceLocation &call_loc,
                                  Expr &maybe_callable,
                                  const std::vector<Expr *> &args, bool pure,

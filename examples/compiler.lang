@@ -32,11 +32,10 @@ cdecl LLVMCreateTargetMachine = \cptr cptr cptr cptr int int int -> cptr
 cdecl LLVMTargetMachineEmitToFile = \cptr cptr cptr int cptr -> int
 
 def writeln = \IO io GENERIC s -> IO
-  write(write(io s) "\n")
+  io.write(s).write("\n")
 
 def writeln = \IO io GENERIC arg GENERIC_REMAINING remaining -> IO
-  let io2 = write(io arg)
-  writeln(io2 remaining)
+  io.write(arg).writeln(remaining)
 
 def any = \bool a -> bool
   a
@@ -254,21 +253,7 @@ def read_token = \IO io int old_row int old_col -> <[128 x char] IO int int int>
       1
       row col)
 
-  # TODO: Something that propagates the first argument (or first N arguments)
-  # would be nice so we don't have to do this. Something maybe like:
-  #
-  #   io2 $ writeln("Token: " res[0]) $ writeln("row: " res[3])
-  #       $ writeln("col:" res[4])  # Returns an io
-  #
-  # What this does is insert io2 as the first argument to each of these calls.
-  # If we had something similar to go's class methods, we could also have
-  # something like:
-  #
-  #   io2.writeln("Token: " res[0]).writeln("row: " res[3])
-  #      .writeln("col:" res[4])  # Returns an io
-  keep _ = writeln(io2 "TOKEN: " GET res 0)
-  keep _2 = writeln(io2 "row: " GET res 3)
-  keep _3 = writeln(io2 "col: " GET res 4)
+  keep _ = io2.writeln("TOKEN: " res[0]).writeln("row: " res[3]).writeln("col: " res[4])
 
   res
 

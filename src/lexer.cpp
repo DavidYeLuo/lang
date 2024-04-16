@@ -49,6 +49,7 @@ const std::map<char, Token::TokenKind> kSimpleCharsMap{
     {'<', Token::TK_LAngleBrack}, {'>', Token::TK_RAngleBrack},
     {'[', Token::TK_LSqBrack},    {']', Token::TK_RSqBrack},
     {'(', Token::TK_LParen},      {')', Token::TK_RParen},
+    {'.', Token::TK_Dot},
 };
 
 }  // namespace

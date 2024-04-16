@@ -309,7 +309,7 @@ Result<const Type *> Parser::ParseType() {
 
     // TODO: Check custom types here eventually.
     if (!IsBuiltinType(type_name)) {
-      return getErrorDiag() << res->getStart() << "Unknown builtin type `"
+      return getErrorDiag() << res->getStart() << ": Unknown builtin type `"
                             << type_name << "`" << DumpLine{res->getStart()};
     }
 
@@ -455,6 +455,52 @@ Result<Expr *> Parser::ParseAltSyntaxes(Expr &expr) {
       Get &get = builder_.getGet(expr.getStart(), result_type, expr, idx);
       return ParseAltSyntaxes(get);
     }
+  }
+
+  // Check for the method syntax <expr> "." <identifier> "(" ... ")".
+  //
+  // TODO: Once we support structs with named members, we should update this to
+  // not always expect calls.
+  if (peek->isa(Token::TK_Dot)) {
+    // Handle the method syntax.
+    Consume(Token::TK_Dot);
+
+    // Parse the method name.
+    Result<Token> res = lexer_.Lex();
+    if (!res)
+      return res;
+    if (!res->isa(Token::TK_Identifier)) {
+      return getErrorDiag()
+             << res->getStart()
+             << ": Expected an identifier for the method name; instead found `"
+             << res->getChars() << "`" << DumpLine{res->getStart()};
+    }
+
+    // Get the first identifier as an expression.
+    std::vector<Expr *> parsed_args;
+    parsed_args.push_back(&expr);
+
+    // Falthrough to the alt call syntax.
+    std::string name(res->getChars());
+
+    res = lexer_.Lex();
+    if (!res)
+      return res;
+    if (!res->isa(Token::TK_LParen)) {
+      return getErrorDiag()
+             << res->getStart()
+             << ": Expected '(' to indicate the start of a call; instead found "
+                "`"
+             << res->getChars() << "`" << DumpLine{res->getStart()};
+    }
+
+    // Handle the new call syntax.
+    Result<Expr *> call =
+        ParseCallFromArgs(expr.getStart(), name, parsed_args, Token::TK_RParen);
+    if (!call)
+      return call;
+
+    return ParseAltSyntaxes(**call);
   }
 
   return &expr;
@@ -810,15 +856,41 @@ Result<Expr *> Parser::ParseLet(const Type *hint) {
   return body_res;
 }
 
+Result<Expr *> Parser::ParseCallFromArgs(const SourceLocation &call_loc,
+                                         std::string_view name,
+                                         const std::vector<Expr *> &parsed_args,
+                                         Token::TokenKind end_tok,
+                                         const Type *return_type_hint) {
+  auto maybe_callable_and_args = ParseCallableFromArgs(
+      call_loc, name, parsed_args, end_tok, return_type_hint);
+  if (!maybe_callable_and_args)
+    return maybe_callable_and_args;
+  Consume(end_tok);
+
+  auto &callables = maybe_callable_and_args->possible_callables;
+  auto &args = maybe_callable_and_args->args;
+  assert(!callables.empty());
+  if (callables.size() == 1) {
+    return getAndCheckCall(call_loc, *callables.front(), args,
+                           /*pure=*/false, return_type_hint);
+  }
+
+  return &builder_.getAmbiguousCall(call_loc, callables, args);
+}
+
 Result<Parser::CallableResults> Parser::ParseCallableFromArgs(
     const SourceLocation &call_loc, std::string_view name,
-    Token::TokenKind end_tok, const Type *return_type_hint) {
-  auto args = ParseCallArguments(end_tok);
-  if (!args)
-    return args;
+    const std::vector<Expr *> &parsed_args, Token::TokenKind end_tok,
+    const Type *return_type_hint) {
+  auto args_res = ParseCallArguments(end_tok);
+  if (!args_res)
+    return args_res;
+  std::vector<Expr *> args;
+  args.insert(args.end(), parsed_args.begin(), parsed_args.end());
+  args.insert(args.end(), args_res->begin(), args_res->end());
 
-  std::vector<const Type *> arg_types(args->size());
-  std::transform(args->begin(), args->end(), arg_types.begin(),
+  std::vector<const Type *> arg_types(args.size());
+  std::transform(args.begin(), args.end(), arg_types.begin(),
                  [](const Expr *expr) { return &expr->getType(); });
 
   std::vector<Expr *> possible_callables =
@@ -845,47 +917,66 @@ Result<Parser::CallableResults> Parser::ParseCallableFromArgs(
 
   if (possible_callables.size() > 1) {
     if (AmbiguousCall::CanMake(possible_callables))
-      return CallableResults{possible_callables, *args};
+      return CallableResults{possible_callables, args};
 
     return getAmbiguousCallDiag(call_loc, name, possible_callables, &arg_types);
   }
 
-  return CallableResults{possible_callables, *args};
+  return CallableResults{possible_callables, args};
 }
 
 Result<Expr *> Parser::ParseIdentifier(const Type *hint) {
   Result<Token> res = lexer_.Lex();
   assert(res && res->getKind() == Token::TK_Identifier);
+  SourceLocation loc = res->getStart();
 
-  std::string_view name(res->getChars());
+  std::string name(res->getChars());
   if (!HasVar(name))
-    return getErrorDiag() << res->getStart() << "Unknown variable `" << name
-                          << "`" << DumpLine{res->getStart()};
+    return getErrorDiag() << loc << "Unknown variable `" << name << "`"
+                          << DumpLine{loc};
 
-  if (const auto *callable_ty = llvm::dyn_cast_or_null<CallableType>(hint)) {
-    if (HasVar(name, *callable_ty))
-      return &LookupCallable(name, *callable_ty);
+  const auto *callable_ty = llvm::dyn_cast_or_null<CallableType>(hint);
+  if (callable_ty && HasVar(name, *callable_ty))
+    return &LookupCallable(name, *callable_ty);
+
+  Result<Token> peek = lexer_.Peek();
+  if (!peek)
+    return peek;
+
+  std::vector<Expr *> parsed_args;
+  if (peek->isa(Token::TK_Dot)) {
+    // Handle the method syntax.
+    Consume(Token::TK_Dot);
+
+    // Parse the method name.
+    res = lexer_.Lex();
+    if (!res)
+      return res;
+    if (!res->isa(Token::TK_Identifier)) {
+      return getErrorDiag()
+             << res->getStart()
+             << ": Expected an identifier for the method name; instead found `"
+             << res->getChars() << "`" << DumpLine{res->getStart()};
+    }
+
+    // Get the first identifier as an expression.
+    Expr &expr = LookupSingleExpr(name);
+    parsed_args.push_back(&expr);
+
+    // Falthrough to the alt call syntax.
+    name = res->getChars();
+    peek = lexer_.Peek();
+    if (!peek)
+      return peek;
   }
 
   // Handle a potential call.
-  if (lexer_.Peek()->isa(Token::TK_LParen)) {
+  //
+  // TODO: See if we can consolidate this with ParseAltSyntaxes.
+  if (peek->isa(Token::TK_LParen)) {
     // Handle the new call syntax.
     Consume(Token::TK_LParen);
-    auto maybe_callable_and_args =
-        ParseCallableFromArgs(res->getStart(), name, Token::TK_RParen, hint);
-    if (!maybe_callable_and_args)
-      return maybe_callable_and_args;
-    Consume(Token::TK_RParen);
-
-    auto &callables = maybe_callable_and_args->possible_callables;
-    auto &args = maybe_callable_and_args->args;
-    assert(!callables.empty());
-    if (callables.size() == 1) {
-      return getAndCheckCall(res->getStart(), *callables.front(), args,
-                             /*pure=*/false, hint);
-    }
-
-    return &builder_.getAmbiguousCall(res->getStart(), callables, args);
+    return ParseCallFromArgs(loc, name, parsed_args, Token::TK_RParen, hint);
   }
 
   return &LookupSingleExpr(name);
@@ -964,53 +1055,37 @@ Result<Expr *> Parser::ParseCall(const Type *return_type_hint) {
       is_identifier && getNumPossibleCallables(res->getChars()) > 1;
 
   Expr *callable;
-  std::vector<Expr *> args;
   if (should_deduce_call_from_args) {
     // We have multiple possible function overloads we can call, so attempt to
     // find the right one from the arguments.
     std::string func_name(res->getChars());
     Consume(Token::TK_Identifier);
-
-    auto maybe_callable = ParseCallableFromArgs(
-        res->getStart(), func_name, Token::TK_End, return_type_hint);
-    if (!maybe_callable)
-      return maybe_callable;
-
-    auto &callables = maybe_callable->possible_callables;
-    args = maybe_callable->args;
-    if (callables.size() > 1) {
-      // TODO: Clean this up and consolidate with `getAndCheckCall`.
-      AmbiguousCall &call =
-          builder_.getAmbiguousCall(call_loc, callables, args);
-      Consume(Token::TK_End);
-      return &call;
-    }
-
-    callable = callables.front();
-  } else {
-    Result<Expr *> callable_res = ParseExpr();
-    if (!callable_res)
-      return callable_res;
-
-    callable = *callable_res;
-    const Type &type = callable->getType();
-    if (!llvm::isa<CallableType>(type)) {
-      return getErrorDiag()
-             << callable->getStart()
-             << ": Expected callable expression to be a callable type; instead "
-                "found "
-             << type.toString() << DumpLine{callable->getStart()};
-    }
-
-    auto args_res =
-        ParseCallArguments(Token::TK_End, &llvm::cast<CallableType>(type));
-    if (!args_res)
-      return args_res;
-    args = *args_res;
+    return ParseCallFromArgs(res->getStart(), func_name, /*parsed_args=*/{},
+                             Token::TK_End, return_type_hint);
   }
+
+  Result<Expr *> callable_res = ParseExpr();
+  if (!callable_res)
+    return callable_res;
+
+  callable = *callable_res;
+  const Type &type = callable->getType();
+  if (!llvm::isa<CallableType>(type)) {
+    return getErrorDiag()
+           << callable->getStart()
+           << ": Expected callable expression to be a callable type; instead "
+              "found "
+           << type.toString() << DumpLine{callable->getStart()};
+  }
+
+  auto args_res =
+      ParseCallArguments(Token::TK_End, &llvm::cast<CallableType>(type));
+  if (!args_res)
+    return args_res;
   Consume(Token::TK_End);
 
-  return getAndCheckCall(call_loc, *callable, args, pure, return_type_hint);
+  return getAndCheckCall(call_loc, *callable, *args_res, pure,
+                         return_type_hint);
 }
 
 Result<Call *> Parser::getAndCheckCall(const SourceLocation &callable_loc,
