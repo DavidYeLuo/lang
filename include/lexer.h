@@ -34,6 +34,7 @@ class Token {
     TK_Zero,
     TK_As,
     TK_Mut,
+    TK_Dot,          // .
     TK_Comma,        // ,
     TK_Colon,        // :
     TK_LAngleBrack,  // <

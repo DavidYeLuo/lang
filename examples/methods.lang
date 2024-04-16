@@ -1,0 +1,27 @@
+def write = \IO io GENERIC arg GENERIC_REMAINING remaining -> IO
+  # This is equivalent to:
+  #
+  #   write(write(io arg) remaining)
+  #
+  io.write(arg).write(remaining)
+
+def writeln = \IO io GENERIC arg -> IO
+  # This is equivalent to:
+  #
+  #   write(io arg "\n")
+  #
+  io.write(arg "\n")
+
+def writeln = \IO io GENERIC arg GENERIC_REMAINING remaining -> IO
+  # This is equivalent to:
+  #
+  #   writeln(write(io arg) remaining)
+  #
+  io.write(arg).writeln(remaining)
+
+def main = \IO io -> IO
+  # This is equivalent to:
+  #
+  #   writeln(writeln(write(io "ab") "cd") "brand " "new " "line")
+  #
+  io.write("ab").writeln("cd").writeln("brand " "new " "line")
