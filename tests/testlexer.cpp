@@ -45,5 +45,32 @@ TEST(Lexer, HelloWorld) {
   CheckToken(*lexer.Lex(), Token::TK_End, 2, 33, 2, 36, "end");
   ASSERT_EQ(lexer.Lex()->getKind(), Token::TK_EOF);
 }
+TEST(Lexer, MulToken) {
+  using lang::Token;
+
+  constexpr char expr[] = "MUL 5 10";
+
+  std::stringstream input(expr);
+  lang::Lexer lexer(input);
+
+  using lang::pos_t;
+  auto CheckToken = [](const Token &tok, lang::Token::TokenKind expected_kind,
+                       pos_t expected_start_row, pos_t expected_start_col,
+                       pos_t expected_end_row, pos_t expected_end_col,
+                       std::string_view expected_chars) {
+    ASSERT_EQ(tok.getKind(), expected_kind);
+    ASSERT_EQ(tok.getStart().getRow(), expected_start_row);
+    ASSERT_EQ(tok.getStart().getCol(), expected_start_col);
+    ASSERT_EQ(tok.getEnd().getRow(), expected_end_row);
+    ASSERT_EQ(tok.getEnd().getCol(), expected_end_col);
+    ASSERT_EQ(tok.getChars(), expected_chars);
+  };
+
+  Token mul = *lexer.Lex();
+  CheckToken(mul, Token::TK_MUL, 1, 1, 1, 4, "MUL");
+  CheckToken(*lexer.Lex(), Token::TK_Int, 1, 5, 1, 6, "5");
+  CheckToken(*lexer.Lex(), Token::TK_Int, 1, 7, 1, 9, "10");
+  ASSERT_EQ(mul.isBinOpKind(), true);
+}
 
 }  // namespace
