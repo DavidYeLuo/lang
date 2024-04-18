@@ -1,0 +1,19 @@
+def unwrap = \char c -> {int i char lower char upper}
+  {
+    i: CAST int c
+    lower: c
+    upper: ADD SUB c 'a' 'A'
+  }
+
+def write = \IO io GENERIC arg GENERIC_REMAINING rem -> IO
+  io.write(arg).write(rem)
+
+def func = \IO io char c char last -> IO
+  if LT last c
+    io
+  else
+    let s = unwrap(c)
+    io.write(s.i " " s.lower " " s.upper "\n").func(ADD c CAST char 1 last)
+
+def main = \IO io -> IO
+  func(io 'a' 'z')

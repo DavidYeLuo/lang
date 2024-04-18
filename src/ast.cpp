@@ -20,7 +20,11 @@ bool Type::CheckQualifiers(const Type &rhs, QualifierCmp cmp) const {
 
 bool Type::isAggregateType() const {
   return llvm::isa<CompositeType>(this) || llvm::isa<ArrayType>(this) ||
-         isGeneric();
+         llvm::isa<StructType>(this) || isGeneric();
+}
+
+bool Type::isStructType() const {
+  return llvm::isa<StructType>(this) || isGeneric();
 }
 
 bool GenericType::Equals(const Type &other, QualifierCmp cmp) const {
@@ -52,6 +56,28 @@ bool ArrayType::Equals(const Type &rhs, QualifierCmp cmp) const {
       return false;
 
     return getElemType().Equals(array_rhs->getElemType(), cmp);
+  }
+  return false;
+}
+
+bool StructType::Equals(const Type &rhs, QualifierCmp cmp) const {
+  if (!CheckQualifiers(rhs, cmp))
+    return false;
+
+  if (const auto *struct_rhs = llvm::dyn_cast<StructType>(&rhs)) {
+    if (getNumTypes() != struct_rhs->getNumTypes())
+      return false;
+
+    for (auto it = types_.begin(); it != types_.end(); ++it) {
+      std::string_view name(it->first);
+      if (!struct_rhs->hasField(name))
+        return false;
+
+      if (!getField(name).Equals(struct_rhs->getField(name), cmp))
+        return false;
+    }
+
+    return true;
   }
   return false;
 }
@@ -218,10 +244,6 @@ bool Type::isCharArray() const {
   return false;
 }
 
-bool Type::isCompositeOrArrayType() const {
-  return llvm::isa<CompositeType>(this) || llvm::isa<ArrayType>(this);
-}
-
 bool Readc::IsReadcType(const Type &type) {
   if (const auto *callable_ty = llvm::dyn_cast<CallableType>(&type)) {
     if (const auto *comp_ty =
@@ -292,6 +314,12 @@ bool Type::CanConvertFrom(const Type &from) const {
   return Equals(from, QualifierCmp::RetainImmutability);
 }
 
+void Module::AddTypeDef(std::string_view name, const Type &type) {
+  assert(!typedefs_.contains(name));
+  assert(!IsBuiltinType(name));
+  typedefs_[std::string(name)] = &type;
+}
+
 void Module::AddDeclaration(std::string_view name, Declare &expr) {
   assert(expr.getName() == name);
   auto &decls = top_level_exprs_[std::string(name)];
@@ -342,6 +370,18 @@ Get::Get(const SourceLocation &start, const Type &type, Expr &expr, Expr &idx)
 
   expr.AddUser(*this);
   idx.AddUser(*this);
+}
+
+StructGet::StructGet(const SourceLocation &start, const Type &type, Expr &expr,
+                     std::string_view member)
+    : Expr(NK_StructGet, start, type), expr_(expr), member_(member) {
+  assert(expr.getType().isStructType());
+
+  if (const auto *struct_ty = llvm::dyn_cast<StructType>(&expr.getType())) {
+    assert(struct_ty->hasField(member));
+  }
+
+  expr.AddUser(*this);
 }
 
 }  // namespace lang

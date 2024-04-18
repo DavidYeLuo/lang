@@ -13,6 +13,7 @@ class Token {
  public:
   enum TokenKind {
     TK_Def,
+    TK_TypeDef,
     TK_Decl,
     TK_CDecl,
     TK_Identifier,
@@ -43,6 +44,8 @@ class Token {
     TK_RSqBrack,     // ]
     TK_LParen,       // (
     TK_RParen,       // )
+    TK_LCurlBrace,   // <
+    TK_RCurlBrace,   // >
     TK_CAST,
     TK_GET,
     TK_SET,

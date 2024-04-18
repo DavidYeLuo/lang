@@ -91,29 +91,32 @@ class Compiler {
   llvm::Value *getBinOp(llvm::IRBuilder<> &builder, const BinOp &binop);
   llvm::Value *getIf(llvm::IRBuilder<> &builder, const If &);
   llvm::Value *getCast(llvm::IRBuilder<> &builder, const Cast &);
+  llvm::Value *getStructGet(llvm::IRBuilder<> &builder, const StructGet &);
   llvm::Value *getGet(llvm::IRBuilder<> &builder, const Get &);
   llvm::Value *getSet(llvm::IRBuilder<> &builder, const Set &);
   llvm::Value *getComposite(llvm::IRBuilder<> &builder, const Composite &);
+  llvm::Value *getStruct(llvm::IRBuilder<> &builder, const Struct &);
 
-  llvm::Type *getLLVMType(const Expr &expr) const {
+  llvm::Type *getLLVMType(const Expr &expr) {
     return getLLVMType(expr.getType());
   }
-  llvm::FunctionType *getLLVMFuncType(const Expr &expr) const {
+  llvm::FunctionType *getLLVMFuncType(const Expr &expr) {
     return getLLVMFuncType(expr.getType());
   }
-  llvm::Type *getLLVMType(const Type &ty) const;
-  llvm::Type *getLLVMType(const NamedType &type) const;
-  llvm::Type *getLLVMType(const CompositeType &ty) const;
-  llvm::Type *getLLVMType(const ArrayType &ty) const;
-  llvm::Type *getLLVMType(const CallableType &ty) const {
+  llvm::Type *getLLVMType(const Type &ty);
+  llvm::Type *getLLVMType(const NamedType &type);
+  llvm::Type *getLLVMType(const StructType &ty);
+  llvm::Type *getLLVMType(const CompositeType &ty);
+  llvm::Type *getLLVMType(const ArrayType &ty);
+  llvm::Type *getLLVMType(const CallableType &ty) {
     return getLLVMFuncType(ty);
   }
-  llvm::Type *getLLVMType(const GenericType &ty) const {
+  llvm::Type *getLLVMType(const GenericType &ty) {
     UNREACHABLE("Generic types should not be directly used for code emission.");
     return nullptr;
   }
-  llvm::FunctionType *getLLVMFuncType(const CallableType &ty) const;
-  llvm::FunctionType *getLLVMFuncType(const Type &ty) const {
+  llvm::FunctionType *getLLVMFuncType(const CallableType &ty);
+  llvm::FunctionType *getLLVMFuncType(const Type &ty) {
     return getLLVMFuncType(llvm::cast<CallableType>(ty));
   }
 
@@ -164,7 +167,7 @@ class Compiler {
 
     // We should return composite/array types via the first argument because
     // they may be too large for a return type for LLVM.
-    if (!ret.isCompositeOrArrayType())
+    if (!ret.isAggregateType())
       return ReturnNormalType;
 
     // However, since this callable now owns all of the expressions passed it
@@ -224,6 +227,10 @@ class Compiler {
   llvm::DIBuilder di_builder_;
   llvm::DIFile &di_unit_;
   llvm::DICompileUnit &di_cu_;
+
+  std::map<const Type *, llvm::Type *> cached_types_;
+  std::map<const Type *, std::vector<std::pair<std::string, llvm::Type *>>>
+      cached_ordered_fields_;
 };
 
 llvm::DIType *Compiler::getDIType(const NamedType &named_ty) {
@@ -255,6 +262,15 @@ llvm::DIType *Compiler::getDIType(const GenericRemainingType &) {
 
 llvm::DIType *Compiler::getDIType(const GenericType &) {
   UNREACHABLE("Generic types should not be directly used for code emission.");
+}
+
+llvm::DIType *Compiler::getDIType(const StructType &struct_ty) {
+  llvm::Type *llvm_ty = getLLVMType(struct_ty);
+  return di_builder_.createStructType(
+      &di_unit_, /*Name=*/"", &di_unit_, /*LineNumber=*/0,
+      mod_.getDataLayout().getTypeAllocSizeInBits(llvm_ty),
+      mod_.getDataLayout().getTypeAllocSizeInBits(llvm_ty),
+      llvm::DINode::FlagZero, /*DerivedFrom=*/nullptr, llvm::DINodeArray());
 }
 
 llvm::DIType *Compiler::getDIType(const CompositeType &comp_ty) {
@@ -360,7 +376,7 @@ llvm::Function *Compiler::getMainWrapper(llvm::FunctionType *func_ty) const {
   return impl_func;
 }
 
-llvm::FunctionType *Compiler::getLLVMFuncType(const CallableType &ty) const {
+llvm::FunctionType *Compiler::getLLVMFuncType(const CallableType &ty) {
   std::vector<llvm::Type *> func_args;
   ReturnStrategy return_strat = getCallableReturnStrategy(ty);
   if (return_strat == ReturnAsFirstArg) {
@@ -393,7 +409,7 @@ llvm::FunctionType *Compiler::getLLVMFuncType(const CallableType &ty) const {
   return llvm::FunctionType::get(ret_ty, func_args, /*isVarArg=*/false);
 }
 
-llvm::Type *Compiler::getLLVMType(const Type &ty) const {
+llvm::Type *Compiler::getLLVMType(const Type &ty) {
   switch (ty.getKind()) {
 #define TYPE(name)      \
   case Type::TK_##name: \
@@ -403,19 +419,64 @@ llvm::Type *Compiler::getLLVMType(const Type &ty) const {
   __builtin_unreachable();
 }
 
-llvm::Type *Compiler::getLLVMType(const ArrayType &type) const {
-  return llvm::ArrayType::get(getLLVMType(type.getElemType()),
-                              type.getNumElems());
+llvm::Type *Compiler::getLLVMType(const ArrayType &type) {
+  auto found = cached_types_.find(&type);
+  if (found != cached_types_.end())
+    return found->second;
+
+  cached_types_[&type] =
+      llvm::ArrayType::get(getLLVMType(type.getElemType()), type.getNumElems());
+  return cached_types_.at(&type);
 }
 
-llvm::Type *Compiler::getLLVMType(const CompositeType &type) const {
+llvm::Type *Compiler::getLLVMType(const CompositeType &type) {
+  auto found = cached_types_.find(&type);
+  if (found != cached_types_.end())
+    return found->second;
+
   std::vector<llvm::Type *> types;
   for (const Type *ty : type.getTypes())
     types.push_back(getLLVMType(*ty));
-  return llvm::StructType::create(types);
+  cached_types_[&type] = llvm::StructType::create(types);
+  return cached_types_.at(&type);
 }
 
-llvm::Type *Compiler::getLLVMType(const NamedType &type) const {
+llvm::Type *Compiler::getLLVMType(const StructType &type) {
+  auto found = cached_types_.find(&type);
+  if (found != cached_types_.end())
+    return found->second;
+
+  // std::vector<std::pair<std::string, llvm::Type *>> fields;
+  auto &fields = cached_ordered_fields_[&type];
+  fields.reserve(type.getNumTypes());
+  for (auto it = type.getTypes().begin(); it != type.getTypes().end(); ++it)
+    fields.emplace_back(it->first, getLLVMType(*it->second));
+
+  // To minimize struct size, sort all the elements by size.
+  std::sort(fields.begin(), fields.end(), [&](const auto &p1, const auto &p2) {
+    std::string_view name1 = p1.first;
+    size_t size1 = mod_.getDataLayout().getTypeAllocSize(p1.second);
+    std::string_view name2 = p2.first;
+    size_t size2 = mod_.getDataLayout().getTypeAllocSize(p2.second);
+
+    if (size1 < size2)
+      return true;
+    if (size1 > size2)
+      return false;
+
+    // Fall back to the name to always make sure we have the same order.
+    return name1.compare(name2) < 0;
+  });
+
+  std::vector<llvm::Type *> types;
+  types.reserve(fields.size());
+  for (const auto &p : fields)
+    types.push_back(p.second);
+  cached_types_[&type] = llvm::StructType::create(types);
+  return cached_types_.at(&type);
+}
+
+llvm::Type *Compiler::getLLVMType(const NamedType &type) {
   if (type.getName() == builtins::kIOTypeName)
     return getIntType(32);
   if (type.getName() == builtins::kIntTypeName)
@@ -592,6 +653,8 @@ llvm::Value *Compiler::getExpr(llvm::IRBuilder<> &builder, const Expr &expr) {
 llvm::Value *Compiler::getExprImpl(llvm::IRBuilder<> &builder,
                                    const Expr &expr) {
   switch (expr.getKind()) {
+    case Node::NK_TypeDef:
+      UNREACHABLE("TypeDef is not an expression.");
     case Node::NK_Declare: {
       const Declare &decl = llvm::cast<Declare>(expr);
       if (decl.isBuiltinWrite())
@@ -600,6 +663,8 @@ llvm::Value *Compiler::getExprImpl(llvm::IRBuilder<> &builder,
     }
     case Node::NK_AmbiguousCall:
       UNREACHABLE("This should've been resolved during lowering");
+    case Node::NK_StructGet:
+      return getStructGet(builder, llvm::cast<StructGet>(expr));
     case Node::NK_Get:
       return getGet(builder, llvm::cast<Get>(expr));
     case Node::NK_Set:
@@ -624,6 +689,8 @@ llvm::Value *Compiler::getExprImpl(llvm::IRBuilder<> &builder,
       UNREACHABLE("Callables should be handled on their own in getExpr");
     case Node::NK_Composite:
       return getComposite(builder, llvm::cast<Composite>(expr));
+    case Node::NK_Struct:
+      return getStruct(builder, llvm::cast<Struct>(expr));
     case Node::NK_Arg: {
       const Arg &arg = llvm::cast<Arg>(expr);
       const Callable &parent = arg.getParent();
@@ -777,7 +844,7 @@ llvm::Value *Compiler::getZero(llvm::IRBuilder<> &builder, const Zero &zero) {
   }
 
   // These can be just constants.
-  if (t.isCompositeOrArrayType()) {
+  if (t.isAggregateType()) {
     // This is a constant, so we can just create a global variable.
     auto *initializer = llvm::Constant::getNullValue(getLLVMType(t));
     auto *glob =
@@ -829,6 +896,27 @@ llvm::Value *Compiler::ManifestWrite(const Declare &write) {
   return func;
 }
 
+llvm::Value *Compiler::getStructGet(llvm::IRBuilder<> &builder,
+                                    const StructGet &get) {
+  const Type &struct_ty = get.getExpr().getType();
+  llvm::Value *expr = getExpr(builder, get.getExpr());
+  llvm::Type *expr_ty = getLLVMType(get.getExpr());
+
+  const auto &field_layout = cached_ordered_fields_.at(&struct_ty);
+  auto found_member =
+      std::find_if(field_layout.begin(), field_layout.end(),
+                   [&](const auto &p) { return p.first == get.getMember(); });
+  assert(found_member != field_layout.end() &&
+         "Couldn't find member in struct");
+  size_t offset = found_member - field_layout.begin();
+
+  llvm::Value *gep = builder.CreateConstGEP2_32(expr_ty, expr, 0, offset);
+  if (get.getType().isAggregateType())
+    return gep;
+  llvm::Type *res_type = getLLVMType(get.getType());
+  return builder.CreateLoad(res_type, gep);
+}
+
 llvm::Value *Compiler::getGet(llvm::IRBuilder<> &builder, const Get &get) {
   llvm::Value *expr = getExpr(builder, get.getExpr());
   llvm::Type *expr_ty = getLLVMType(get.getExpr());
@@ -836,7 +924,7 @@ llvm::Value *Compiler::getGet(llvm::IRBuilder<> &builder, const Get &get) {
       builder.CreateGEP(expr_ty, expr,
                         {llvm::Constant::getNullValue(getIntType(32)),
                          getExpr(builder, get.getIdx())});
-  if (get.getType().isCompositeOrArrayType())
+  if (get.getType().isAggregateType())
     return gep;
   llvm::Type *res_type = getLLVMType(get.getType());
   return builder.CreateLoad(res_type, gep);
@@ -962,7 +1050,7 @@ llvm::Value *Compiler::getCall(llvm::IRBuilder<> &builder, const Call &call) {
 void Compiler::DoStore(llvm::IRBuilder<> &builder, llvm::Value *store_ptr,
                        const Expr &expr) {
   llvm::Value *res = getExpr(builder, expr);
-  if (expr.getType().isCompositeOrArrayType()) {
+  if (expr.getType().isAggregateType()) {
     size_t size = mod_.getDataLayout().getTypeAllocSize(getLLVMType(expr));
     builder.CreateMemCpy(store_ptr, llvm::MaybeAlign(), res, llvm::MaybeAlign(),
                          size);
@@ -971,10 +1059,43 @@ void Compiler::DoStore(llvm::IRBuilder<> &builder, llvm::Value *store_ptr,
   }
 }
 
+llvm::Value *Compiler::getStruct(llvm::IRBuilder<> &builder, const Struct &s) {
+  const Type &t = s.getType();
+  llvm::StructType *llvm_ty = llvm::cast<llvm::StructType>(getLLVMType(t));
+  auto &field_layout = cached_ordered_fields_.at(&t);
+
+  // if (t.isMutable()) {
+  //  This is always mutable, so lets make it a stack allocation.
+  llvm::Value *alloc = builder.CreateAlloca(llvm_ty);
+
+  for (size_t i = 0; i < field_layout.size(); ++i) {
+    std::string_view name = field_layout.at(i).first;
+    const Expr &e = s.getField(name);
+    llvm::Value *ptr = builder.CreateConstGEP2_32(llvm_ty, alloc, 0, i);
+    DoStore(builder, ptr, e);
+  }
+  return alloc;
+  //}
+
+  // FIXME: We can only use a Constant here if we know this value is evaluatable
+  // at compile time, but we don't have any way to support that.
+  //
+  //// This is a constant, so we can just create a global variable.
+  // auto *glob = llvm::ConstantStruct::get(llvm_ty, );
+  // auto *initializer = llvm::Constant::getNullValue(getLLVMType(t));
+  // auto *glob =
+  //     new llvm::GlobalVariable(mod_, getLLVMType(t), /*isConstant=*/true,
+  //                              /*Linkage=*/llvm::GlobalValue::ExternalLinkage,
+  //                              initializer, /*name=*/"");
+  // return glob;
+}
+
 llvm::Value *Compiler::getComposite(llvm::IRBuilder<> &builder,
                                     const Composite &comp) {
   // Since the composite elements may not be constant, we can instead just
   // alloca our structure.
+  //
+  // TODO: If the type is immutable, we should emit a constant global instead.
   llvm::Type *comp_ty = getLLVMType(comp);
   llvm::Value *buff = builder.CreateAlloca(comp_ty);
   for (size_t i = 0; i < comp.getNumElems(); ++i) {

@@ -32,11 +32,13 @@ Result<Module *> Parser::Parse() {
         return ParseDefine();
       else if (next->isa(Token::TK_Decl) || next->isa(Token::TK_CDecl))
         return ParseDeclare();
+      else if (next->isa(Token::TK_TypeDef))
+        return ParseTypeDefine();
       else
         return getErrorDiag()
                << next->getStart() << ": Unknown top level entity `"
                << next->getChars() << "`; "
-               << "expected either `def` or `decl`"
+               << "expected either `def` or `decl` or `typedef`"
                << DumpLine{next->getStart()};
     }();
 
@@ -52,6 +54,47 @@ Result<Module *> Parser::Parse() {
 }
 
 //
+// <typedef> ::= "typedef" <identifier> "=" <type>
+//
+Result<TypeDef *> Parser::ParseTypeDefine() {
+  SourceLocation td_loc = lexer_.PeekLoc();
+  Consume(Token::TK_TypeDef);
+
+  Result<Token> res = lexer_.Lex();
+  if (!res)
+    return res;
+
+  if (res->getKind() != Token::TK_Identifier)
+    return getExpectedIdentifierDiag(*res);
+
+  std::string name(res->getChars());
+  if (module_.hasTypeDef(name)) {
+    return getErrorDiag() << res->getStart() << ": Type with name `" << name
+                          << "` is already defined"
+                          << DumpLine{res->getStart()};
+  }
+
+  res = lexer_.Lex();
+  if (!res)
+    return res;
+
+  if (res->getKind() != Token::TK_Assign)
+    return getErrorDiag() << res->getStart()
+                          << ": Expected `=`; instead found `"
+                          << res->getChars() << "`"
+                          << DumpLine{res->getStart()};
+
+  Result<const Type *> type = ParseType();
+  if (!type)
+    return type;
+
+  module_.AddTypeDef(name, **type);
+
+  // TODO: Actually utilize the typedef node.
+  return &builder_.getTypeDef(td_loc, name, **type);
+}
+
+//
 // <def> ::= "def" <identifier> "=" <expr>
 //
 Result<Declare *> Parser::ParseDefineImpl() {
@@ -63,10 +106,7 @@ Result<Declare *> Parser::ParseDefineImpl() {
     return res;
 
   if (res->getKind() != Token::TK_Identifier)
-    return getErrorDiag() << res->getStart()
-                          << "Expected an identifier; instead found `"
-                          << res->getChars() << "`"
-                          << DumpLine{res->getStart()};
+    return getExpectedIdentifierDiag(*res);
 
   std::string name(res->getChars());
 
@@ -167,10 +207,7 @@ Result<Declare *> Parser::ParseDeclareImpl() {
     return tok;
 
   if (!tok->isa(Token::TK_Identifier))
-    return getErrorDiag() << tok->getStart()
-                          << ": Expected an identifier; instead found `"
-                          << tok->getChars() << "`"
-                          << DumpLine{tok->getStart()};
+    return getExpectedIdentifierDiag(*tok);
 
   std::string name(tok->getChars());
 
@@ -285,11 +322,13 @@ Result<Callable *> Parser::ParseCallable() {
 }
 
 // <type> ::= ( "mut" )? (<namedtype> | <callabletype> | <compositetype> |
-//                        <arraytype> | <generictype> | <genericremainingtype>)
+//                        <arraytype> | <generictype> | <genericremainingtype> |
+//                        <structtype>)
 //   <namedtype>              ::= <identifier>
 //   <callabletype>           ::= "\" <type>* "->" <type>
 //   <compositetype>          ::= "<" <type>+ ">"
 //   <arraytype>              ::= "[" \d+ "x" <type> "]"
+//   <structtype>             ::= "{" (<type> <identifier>)+ "}"
 //   <generictype>            ::= "GENERIC"
 //   <genericremainingtype>   ::= "GENERIC_REMAINING"
 Result<const Type *> Parser::ParseType() {
@@ -307,7 +346,9 @@ Result<const Type *> Parser::ParseType() {
   if (res->isa(Token::TK_Identifier)) {
     std::string_view type_name(res->getChars());
 
-    // TODO: Check custom types here eventually.
+    if (module_.hasTypeDef(type_name))
+      return &module_.getTypeDef(type_name);
+
     if (!IsBuiltinType(type_name)) {
       return getErrorDiag() << res->getStart() << ": Unknown builtin type `"
                             << type_name << "`" << DumpLine{res->getStart()};
@@ -352,6 +393,48 @@ Result<const Type *> Parser::ParseType() {
     } while (!res->isa(Token::TK_RAngleBrack));
     Consume(Token::TK_RAngleBrack);
     return &builder_.getCompositeType(types, mut);
+  } else if (res->isa(Token::TK_LCurlBrace)) {
+    SourceLocation loc = res->getStart();
+    res = lexer_.Peek();
+
+    StructType::TypeMap fields;
+    while (res && !res->isa(Token::TK_RCurlBrace)) {
+      // Expect a type.
+      Result<const Type *> typeres = ParseType();
+      if (!typeres)
+        return typeres;
+
+      // Expect an identifier.
+      res = lexer_.Lex();
+      if (!res)
+        return res;
+      if (!res->isa(Token::TK_Identifier))
+        return getExpectedIdentifierDiag(*res);
+
+      std::string name(res->getChars());
+      if (fields.contains(name)) {
+        return getErrorDiag()
+               << res->getStart() << ": Found duplicate struct member `" << name
+               << "`" << DumpLine{res->getStart()};
+      }
+
+      fields[name] = *typeres;
+
+      res = lexer_.Peek();
+    }
+
+    if (!res)
+      return res;
+
+    if (fields.empty()) {
+      return getErrorDiag()
+             << loc << ": Structs must have at least one field; found none"
+             << DumpLine{loc};
+    }
+
+    Consume(Token::TK_RCurlBrace);
+
+    return &builder_.getStructType(fields, mut);
   } else if (res->isa(Token::TK_LSqBrack)) {
     auto loc = lexer_.getCurrentLoc();
     Result<Int *> num = ParseInt();
@@ -469,12 +552,8 @@ Result<Expr *> Parser::ParseAltSyntaxes(Expr &expr) {
     Result<Token> res = lexer_.Lex();
     if (!res)
       return res;
-    if (!res->isa(Token::TK_Identifier)) {
-      return getErrorDiag()
-             << res->getStart()
-             << ": Expected an identifier for the method name; instead found `"
-             << res->getChars() << "`" << DumpLine{res->getStart()};
-    }
+    if (!res->isa(Token::TK_Identifier))
+      return getExpectedIdentifierDiag(*res);
 
     // Get the first identifier as an expression.
     std::vector<Expr *> parsed_args;
@@ -532,6 +611,7 @@ Result<Expr *> Parser::ParseExprImpl(const Type *hint) {
   if (!res)
     return res;
 
+  // TODO: Make this a switch.
   if (res->getKind() == Token::TK_Call ||
       res->getKind() == Token::TK_ImpureCall)
     return ParseCall(hint);
@@ -561,6 +641,8 @@ Result<Expr *> Parser::ParseExprImpl(const Type *hint) {
     return ParseSet();
   if (res->getKind() == Token::TK_LAngleBrack)
     return ParseComposite();
+  if (res->getKind() == Token::TK_LCurlBrace)
+    return ParseStruct();
   if (res->getKind() == Token::TK_Lambda)
     return ParseCallable();
   if (res->isBinOpKind())
@@ -730,10 +812,7 @@ Result<Keep *> Parser::ParseKeep(const Type *hint) {
     return res;
 
   if (!res->isa(Token::TK_Identifier))
-    return getErrorDiag() << res->getStart()
-                          << ": Expected an identifier but instead found `"
-                          << res->getChars() << "`"
-                          << DumpLine{res->getStart()};
+    return getExpectedIdentifierDiag(*res);
 
   std::string_view name(res->getChars());
   if (HasVar(name)) {
@@ -931,6 +1010,7 @@ Result<Expr *> Parser::ParseIdentifier(const Type *hint) {
   SourceLocation loc = res->getStart();
 
   std::string name(res->getChars());
+  std::string_view original_name(name);
   if (!HasVar(name))
     return getErrorDiag() << loc << "Unknown variable `" << name << "`"
                           << DumpLine{loc};
@@ -943,8 +1023,9 @@ Result<Expr *> Parser::ParseIdentifier(const Type *hint) {
   if (!peek)
     return peek;
 
+  bool saw_dot = peek->isa(Token::TK_Dot);
   std::vector<Expr *> parsed_args;
-  if (peek->isa(Token::TK_Dot)) {
+  if (saw_dot) {
     // Handle the method syntax.
     Consume(Token::TK_Dot);
 
@@ -952,12 +1033,8 @@ Result<Expr *> Parser::ParseIdentifier(const Type *hint) {
     res = lexer_.Lex();
     if (!res)
       return res;
-    if (!res->isa(Token::TK_Identifier)) {
-      return getErrorDiag()
-             << res->getStart()
-             << ": Expected an identifier for the method name; instead found `"
-             << res->getChars() << "`" << DumpLine{res->getStart()};
-    }
+    if (!res->isa(Token::TK_Identifier))
+      return getExpectedIdentifierDiag(*res);
 
     // Get the first identifier as an expression.
     Expr &expr = LookupSingleExpr(name);
@@ -972,11 +1049,37 @@ Result<Expr *> Parser::ParseIdentifier(const Type *hint) {
 
   // Handle a potential call.
   //
-  // TODO: See if we can consolidate this with ParseAltSyntaxes.
+  // TODO: See if we can consolidate this with ParseAltSyntaxes. That would mean
+  // we'd need to propagate a list of possible expressions this could resolve to
+  // for ParseAltSyntaxes to resolve.
   if (peek->isa(Token::TK_LParen)) {
     // Handle the new call syntax.
     Consume(Token::TK_LParen);
     return ParseCallFromArgs(loc, name, parsed_args, Token::TK_RParen, hint);
+  }
+
+  if (saw_dot) {
+    // This is an access to a struct member.
+    Expr &expr = *parsed_args.front();
+
+    if (!expr.getType().isGeneric()) {
+      const StructType *struct_ty = llvm::dyn_cast<StructType>(&expr.getType());
+      if (!struct_ty) {
+        return getErrorDiag()
+               << expr.getStart() << ": Attempting to access `" << name
+               << "` of `" << original_name
+               << "` but expected a struct type; instead found `"
+               << expr.getType().toString() << "`" << DumpLine{expr.getStart()};
+      }
+
+      if (!struct_ty->hasField(name)) {
+        return getErrorDiag() << expr.getStart() << ": No member `" << name
+                              << "` exists in struct type `" << original_name
+                              << "`" << DumpLine{expr.getStart()};
+      }
+    }
+
+    return &builder_.getStructGet(expr.getStart(), expr, name);
   }
 
   return &LookupSingleExpr(name);
@@ -1190,6 +1293,57 @@ Result<Zero *> Parser::ParseZero() {
     return type_res;
 
   return &builder_.getZero(loc, **type_res);
+}
+
+//
+// <struct> ::= "{" (<identifier> ":" <expr>)+ "}"
+//
+Result<Struct *> Parser::ParseStruct() {
+  SourceLocation loc = lexer_.PeekLoc();
+  Consume(Token::TK_LCurlBrace);
+
+  Result<Token> res = lexer_.Peek();
+
+  Struct::FieldMap fields;
+  while (res && !res->isa(Token::TK_RCurlBrace)) {
+    // Expect an identifier.
+    if (!res->isa(Token::TK_Identifier))
+      return getExpectedIdentifierDiag(*res);
+
+    std::string name(res->getChars());
+    if (fields.contains(name)) {
+      return getErrorDiag()
+             << res->getStart() << ": Found duplicate struct member `" << name
+             << "`" << DumpLine{res->getStart()};
+    }
+
+    Consume(Token::TK_Identifier);
+
+    res = lexer_.Lex();
+    if (!res)
+      return res;
+    if (!res->isa(Token::TK_Colon)) {
+      return getErrorDiag()
+             << res->getStart()
+             << ": Expected `:` denoting a struct member; instead found `"
+             << res->getChars() << "`" << DumpLine{res->getStart()};
+    }
+
+    Result<Expr *> exprres = ParseExpr();
+    if (!exprres)
+      return exprres;
+
+    fields[name] = *exprres;
+
+    res = lexer_.Peek();
+  }
+
+  if (!res)
+    return res;
+
+  Consume(Token::TK_RCurlBrace);
+
+  return &builder_.getStruct(loc, fields);
 }
 
 //

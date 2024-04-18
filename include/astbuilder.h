@@ -17,6 +17,13 @@ class ASTBuilder {
  public:
   ASTBuilder() : mutable_generic_(true), immutable_generic_(false) {}
 
+  TypeDef &getTypeDef(const SourceLocation &start, std::string_view name,
+                      const Type &alias) {
+    TypeDef *td = new TypeDef(start, name, alias);
+    nodes_.emplace_back(td);
+    return *td;
+  }
+
   Str &getStr(const SourceLocation &start, std::string_view str) {
     return llvm::cast<Str>(
         *nodes_.emplace_back(new Str(start, str, getCharArrayType(str))));
@@ -152,6 +159,17 @@ class ASTBuilder {
         start, funcs.front()->getType().getReturnType(), funcs, args)));
   }
 
+  Struct &getStruct(const SourceLocation &start,
+                    const Struct::FieldMap &fields) {
+    StructType::TypeMap types;
+    for (const auto &p : fields)
+      types[p.first] = &p.second->getType();
+    const StructType &type = getStructType(types);
+    Struct *s = new Struct(start, type, fields);
+    nodes_.emplace_back(s);
+    return *s;
+  }
+
   Composite &getComposite(const SourceLocation &start,
                           const std::vector<Expr *> &elems) {
     std::vector<const Type *> types;
@@ -171,6 +189,24 @@ class ASTBuilder {
               Expr &idx) {
     return llvm::cast<Get>(
         *nodes_.emplace_back(new Get(start, type, expr, idx)));
+  }
+
+  StructGet &getStructGet(const SourceLocation &start, const Type &type,
+                          Expr &expr, std::string_view member) {
+    StructGet *sget = new StructGet(start, type, expr, member);
+    nodes_.emplace_back(sget);
+    return *sget;
+  }
+
+  StructGet &getStructGet(const SourceLocation &start, Expr &expr,
+                          std::string_view member) {
+    const Type &type = [&]() -> const Type & {
+      bool mut = expr.getType().isMutable();
+      if (expr.getType().isGeneric())
+        return getGenericType(mut);
+      return llvm::cast<StructType>(expr.getType()).getField(member);
+    }();
+    return getStructGet(start, type, expr, member);
   }
 
   Declare &getDeclare(const SourceLocation &start, std::string_view name,
@@ -218,6 +254,13 @@ class ASTBuilder {
                                         bool mut = false) {
     return llvm::cast<CompositeType>(
         *types_.emplace_back(new CompositeType(types, mut)));
+  }
+
+  const StructType &getStructType(const StructType::TypeMap &types,
+                                  bool mut = false) {
+    StructType *struct_ty = new StructType(types, mut);
+    types_.emplace_back(struct_ty);
+    return *struct_ty;
   }
 
   const GenericType &getGenericType(bool mut = false) {

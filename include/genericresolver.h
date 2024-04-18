@@ -70,9 +70,6 @@ class GenericResolver : public NonConstASTVisitor<Node &> {
   Declare &generic_decl_;
   const std::vector<const Type *> &arg_types_;
   Declare *newdecl_ = nullptr;
-  // TODO: Rather than having to do caching for each ast traversal, perhaps the
-  // astbuilder should be in charge of caching. A reference to the exact same
-  // expression can be returned for the exact same input arguments.
   std::map<Expr *, Expr *> cached_exprs_;
 };
 

@@ -24,6 +24,11 @@ std::ostream &ASTDumper::Pad() {
   return out_;
 }
 
+void ASTDumper::Visit(const TypeDef &td) {
+  Pad() << "TypeDef " << td.getName() << " = " << td.getAlias().toString()
+        << "\n";
+}
+
 void ASTDumper::Visit(const Declare &declare) {
   Pad() << "Declare " << declare.getStart() << " " << &declare
         << " name=" << declare.getName()
@@ -141,6 +146,18 @@ void ASTDumper::Visit(const Composite &comp) {
   Dedent();
 }
 
+void ASTDumper::Visit(const Struct &s) {
+  Pad() << "Struct " << &s << "\n";
+  Indent();
+
+  for (const auto &p : s.getFields()) {
+    Pad() << p.first << ": ";
+    Visit(*p.second);
+  }
+
+  Dedent();
+}
+
 void ASTDumper::Visit(const Set &set) {
   Pad() << "Set " << &set << " " << set.getType().toString() << "\n";
   Indent();
@@ -155,6 +172,14 @@ void ASTDumper::Visit(const Get &get) {
   Indent();
   Visit(get.getExpr());
   Visit(get.getIdx());
+  Dedent();
+}
+
+void ASTDumper::Visit(const StructGet &get) {
+  Pad() << "StructGet `" << get.getMember() << "`" << &get << " "
+        << get.getType().toString() << "\n";
+  Indent();
+  Visit(get.getExpr());
   Dedent();
 }
 

@@ -14,9 +14,13 @@
 #define EXPR_LAST(name) EXPR(name)
 #endif
 
+NODE(TypeDef)
+
 EXPR_FIRST(Readc)
 EXPR(Declare)
+EXPR(Struct)
 EXPR(Composite)
+EXPR(StructGet)
 EXPR(Get)
 EXPR(Set)
 EXPR(AmbiguousCall)
