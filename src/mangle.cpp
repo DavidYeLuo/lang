@@ -36,6 +36,17 @@ std::string Mangle(const Type &type) {
       }
       return ss.str();
     }
+    case Type::TK_StructType: {
+      const auto &struct_ty = llvm::cast<StructType>(type);
+      // Use the ordered version so we always produce the same mangle for a
+      // type.
+      auto types = struct_ty.getOrderedTypes();
+      std::stringstream ss;
+      ss << "struct";
+      for (const auto &p : types)
+        ss << "_" << p.first << "_" << Mangle(*p.second);
+      return ss.str();
+    }
   }
   __builtin_unreachable();
 }

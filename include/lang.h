@@ -189,9 +189,22 @@ std::string Join(const IterT &iterable, std::string_view glue, UnaryOp op) {
   if (iterable.empty())
     return "";
   std::stringstream ss;
-  ss << op(iterable.front());
-  for (auto it = std::begin(iterable) + 1; it != iterable.end(); ++it)
+  auto begin = std::begin(iterable);
+  ss << op(*begin);
+  for (auto it = begin + 1; it != std::end(iterable); ++it)
     ss << glue << op(*it);
+  return ss.str();
+}
+
+template <typename IterT, typename UnaryOp>
+std::string JoinIter(const IterT &iterable, std::string_view glue, UnaryOp op) {
+  if (iterable.empty())
+    return "";
+  std::stringstream ss;
+  auto begin = std::begin(iterable);
+  ss << op(begin);
+  for (auto it = ++begin; it != std::end(iterable); ++it)
+    ss << glue << op(it);
   return ss.str();
 }
 

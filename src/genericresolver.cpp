@@ -56,6 +56,11 @@ Declare &GenericResolver::Resolve() {
   return *newdecl_;
 }
 
+Node &GenericResolver::Visit(TypeDef &) {
+  // TODO: It might be helpful to have a visitor only for expressions.
+  UNREACHABLE("GenericResolver should only cover expressions.");
+}
+
 Node &GenericResolver::Visit(Declare &decl) {
   // This is a reference to an existing decl. If we got here through calls, the
   // calls themselves should habdle this.
@@ -67,6 +72,18 @@ Node &GenericResolver::Visit(Declare &decl) {
 Node &GenericResolver::Visit(Composite &comp) {
   return builder_.getComposite(comp.getStart(),
                                CloneExprVector(comp.getElems()));
+}
+
+Node &GenericResolver::Visit(Struct &s) {
+  Struct::FieldMap fields;
+  for (const auto &p : s.getFields())
+    fields[p.first] = &VisitExpr(*p.second);
+  return builder_.getStruct(s.getStart(), fields);
+}
+
+Node &GenericResolver::Visit(StructGet &get) {
+  return builder_.getStructGet(get.getStart(), get.getType(),
+                               VisitExpr(get.getExpr()), get.getMember());
 }
 
 Node &GenericResolver::Visit(Get &get) {

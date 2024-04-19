@@ -84,7 +84,6 @@ class Type {
 
   bool isNamedType(std::string_view name) const;
   bool isBuiltinType() const;
-  bool isCompositeOrArrayType() const;
   bool isCharArray() const;
 
   // A type is generic if it is a generic type or has members or arguments that
@@ -121,6 +120,7 @@ class Type {
   const Type &getReturnType() const;
   bool Matches(const Type &other) const;
   bool isAggregateType() const;
+  bool isStructType() const;
 
  protected:
   virtual std::string toStringImpl() const = 0;
@@ -288,6 +288,88 @@ class CompositeType : public Type {
   const bool mutable_;
 };
 
+class StructType : public Type {
+ public:
+  using TypeMap = std::map<std::string, const Type *, std::less<>>;
+  StructType(const TypeMap &types, bool mut = false)
+      : Type(TK_StructType), types_(types), mutable_(mut) {
+    assert(!types.empty());
+    assert(AllUniqueNames(types) && "Found duplicate member names");
+  }
+
+  static bool classof(const Type *type) {
+    return type->getKind() == TK_StructType;
+  }
+
+  bool isMutable() const override { return mutable_; }
+
+  const auto &getTypes() const { return types_; }
+  bool hasField(std::string_view name) const { return types_.contains(name); }
+  const Type &getField(std::string_view name) const {
+    return *types_.find(name)->second;
+  }
+
+  using OrderedTypes = std::vector<std::pair<std::string_view, const Type *>>;
+  OrderedTypes getOrderedTypes() const {
+    OrderedTypes types;
+    types.reserve(types_.size());
+    for (auto it = types_.begin(); it != types_.end(); ++it)
+      types.emplace_back(it->first, it->second);
+    std::sort(types.begin(), types.end(), [](const auto &p1, const auto &p2) {
+      return p1.first.compare(p2.first) < 0;
+    });
+    return types;
+  }
+  size_t getNumTypes() const { return types_.size(); }
+  const Type &getTypeAt(std::string_view field) const {
+    return *types_.find(field)->second;
+  }
+  bool isGeneric() const override {
+    return std::any_of(types_.begin(), types_.end(),
+                       [](auto it) { return it.second->isGeneric(); });
+  }
+  bool Equals(const Type &other, QualifierCmp) const override;
+
+ protected:
+  std::string toStringImpl() const override {
+    return Concat("{",
+                  JoinIter(types_, " ",
+                           [](auto it) {
+                             return Concat(it->first, ":",
+                                           it->second->toString());
+                           }),
+                  "}");
+  }
+
+ private:
+  static bool AllUniqueNames(const TypeMap &types) {
+    std::set<std::string_view> names;
+    for (auto it = types.begin(); it != types.end(); ++it)
+      names.insert(it->first);
+    return names.size() == types.size();
+  }
+
+  const TypeMap types_;
+  const bool mutable_;
+};
+
+class TypeDef : public Node {
+ public:
+  TypeDef(const SourceLocation &start, std::string_view name, const Type &alias)
+      : Node(NK_TypeDef, start), name_(name), alias_(alias) {}
+
+  static bool classof(const Node *node) {
+    return node->getKind() == NK_TypeDef;
+  }
+
+  std::string_view getName() const { return name_; }
+  const Type &getAlias() const { return alias_; }
+
+ private:
+  std::string name_;
+  const Type &alias_;
+};
+
 class Expr : public Node {
  public:
   Expr(Kind kind, const SourceLocation &start, const Type &type)
@@ -296,6 +378,9 @@ class Expr : public Node {
   static bool classof(const Node *node) {
     return NK_ExprFirst <= node->getKind() && node->getKind() <= NK_ExprLast;
   }
+
+  // TODO: Add `isConstantEvaluatable` to check if this type can be evaluated at
+  // compile time.
 
   const Type &getType() const { return type_; }
   const auto &getUsers() const { return users_; }
@@ -376,6 +461,55 @@ class Declare : public Expr {
 
   // This is used to indicate to the compiler this should generate a printf.
   bool builtin_write_, is_cdecl_;
+};
+
+class Struct : public Expr {
+ public:
+  using FieldMap = std::map<std::string, Expr *, std::less<>>;
+  Struct(const SourceLocation &start, const StructType &type,
+         const FieldMap &fields)
+      : Expr(NK_Struct, start, type), fields_(fields) {
+    assert(!fields.empty());
+    assert(AllUniqueNames(fields) && "Found duplicate member names");
+    for (const auto &p : fields)
+      p.second->AddUser(*this);
+  }
+
+  static bool classof(const Node *node) { return node->getKind() == NK_Struct; }
+  const auto &getFields() const { return fields_; }
+  size_t getNumElems() const { return fields_.size(); }
+  const Expr &getField(std::string_view name) const {
+    return *fields_.find(name)->second;
+  }
+
+ private:
+  // TODO: Consolidate this with StructType::AllUniqueNames.
+  static bool AllUniqueNames(const FieldMap &fields) {
+    std::set<std::string_view> names;
+    for (auto it = fields.begin(); it != fields.end(); ++it)
+      names.insert(it->first);
+    return names.size() == fields.size();
+  }
+
+  FieldMap fields_;
+};
+
+class StructGet : public Expr {
+ public:
+  StructGet(const SourceLocation &start, const Type &type, Expr &expr,
+            std::string_view member);
+
+  static bool classof(const Node *node) {
+    return node->getKind() == NK_StructGet;
+  }
+
+  const Expr &getExpr() const { return expr_; }
+  std::string_view getMember() const { return member_; }
+  Expr &getExpr() { return expr_; }
+
+ private:
+  Expr &expr_;
+  std::string member_;
 };
 
 class Composite : public Expr {
@@ -817,6 +951,13 @@ class If : public Expr {
 class Module {
  public:
   void AddDeclaration(std::string_view name, Declare &expr);
+  void AddTypeDef(std::string_view name, const Type &);
+  bool hasTypeDef(std::string_view name) const {
+    return typedefs_.contains(name);
+  }
+  const Type &getTypeDef(std::string_view name) const {
+    return *typedefs_.find(name)->second;
+  }
 
   const auto &getAST() const { return ast_; }
   const auto &getGenerics() const { return generics_; }
@@ -833,6 +974,7 @@ class Module {
   std::vector<Declare *> ast_;
   std::map<std::string, std::vector<Declare *>, std::less<>> top_level_exprs_;
   std::set<Declare *> generics_;
+  std::map<std::string, const Type *, std::less<>> typedefs_;
 };
 
 }  // namespace lang

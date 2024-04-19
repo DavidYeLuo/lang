@@ -11,6 +11,7 @@
 #endif
 
 TYPE_FIRST(NamedType)
+TYPE(StructType)
 TYPE(CompositeType)
 TYPE(ArrayType)
 TYPE(GenericType)

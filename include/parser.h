@@ -32,6 +32,7 @@ class Parser {
     local_callable_scope_.clear();
     return res;
   }
+  Result<TypeDef *> ParseTypeDefine();
 
   // Each of the ParseExpr functions takes an optional type hint that can be
   // used for checking or inferring types.
@@ -50,6 +51,7 @@ class Parser {
   Result<Get *> ParseGet();
   Result<Set *> ParseSet();
   Result<Composite *> ParseComposite();
+  Result<Struct *> ParseStruct();
   Result<Expr *> ParseLet(const Type *hint = nullptr);
   Result<Keep *> ParseKeep(const Type *hint = nullptr);
   Result<If *> ParseIf(const Type *hint = nullptr);

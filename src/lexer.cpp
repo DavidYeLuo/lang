@@ -12,6 +12,7 @@ namespace lang {
 namespace {
 
 const std::map<std::string, Token::TokenKind> kKeywordMap{
+    {"typedef", Token::TK_TypeDef},
     {"def", Token::TK_Def},
     {"decl", Token::TK_Decl},
     {"cdecl", Token::TK_CDecl},
@@ -49,6 +50,7 @@ const std::map<char, Token::TokenKind> kSimpleCharsMap{
     {'<', Token::TK_LAngleBrack}, {'>', Token::TK_RAngleBrack},
     {'[', Token::TK_LSqBrack},    {']', Token::TK_RSqBrack},
     {'(', Token::TK_LParen},      {')', Token::TK_RParen},
+    {'{', Token::TK_LCurlBrace},  {'}', Token::TK_RCurlBrace},
     {'.', Token::TK_Dot},
 };
 

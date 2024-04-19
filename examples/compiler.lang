@@ -43,6 +43,42 @@ def any = \bool a -> bool
 def any = \bool a GENERIC_REMAINING remaining -> bool
   OR a any(remaining)
 
+typedef SourceLocation = {
+  int row
+  int col
+}
+
+typedef Token = {
+  # TODO: We should also have something akin to enums for this.
+  int kind
+  SourceLocation start
+  [256 x char] chars
+}
+
+typedef Lexer = {
+  IO io
+  int row
+  int col
+}
+
+#def getNextChar = \mut Lexer this -> <mut Lexer int>
+#  # TODO: Something like this might be nice
+#  #
+#  #   let this.io = readc(this.io)
+#  #
+#  let io2, c = readc(io)
+#  let updated = this.io : io2
+#
+#  let row, col =
+#    if LT c 0
+#      <old_row ADD old_col 1>
+#    else
+#
+#    if EQ c CAST int '\n'
+#      <ADD old_row 1 1>
+#    else
+#      <old_row ADD old_col 1>
+
 # Arguments:
 # - IO
 # - The row of the last read character

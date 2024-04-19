@@ -26,6 +26,11 @@ class ASTLowerer : public NonConstASTVisitor<> {
     NonConstASTVisitor::Visit(node);
   }
 
+  void Visit(TypeDef &) {
+    // TODO: It might be helpful to have a visitor only for expressions.
+    UNREACHABLE("ASTLowerer should only cover expressions.");
+  }
+
   void Visit(Declare &decl) {
     if (decl.isDefinition())
       Visit(decl.getBody());
@@ -98,10 +103,17 @@ class ASTLowerer : public NonConstASTVisitor<> {
       Visit(*e);
   }
 
+  void Visit(Struct &s) {
+    for (const auto &p : s.getFields())
+      Visit(*p.second);
+  }
+
   void Visit(Get &get) {
     Visit(get.getExpr());
     Visit(get.getIdx());
   }
+
+  void Visit(StructGet &get) { Visit(get.getExpr()); }
 
   void Visit(Set &set) {
     Visit(set.getExpr());
