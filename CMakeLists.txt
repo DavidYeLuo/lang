@@ -75,3 +75,36 @@ add_subdirectory(tests)
 file(GLOB all_srcs CONFIGURE_DEPENDS "include/*.h" "src/*.cpp" "tests/*.cpp")
 add_custom_target(format ${CLANG_FORMAT} --style=file -i ${all_srcs})
 add_custom_target(format-check ${CLANG_FORMAT} --style=file ${all_srcs} --dry-run -Werror)
+
+# EXAMPLES BUILD
+set(bin_example_dir ${CMAKE_BINARY_DIR}/bin/examples)
+set(obj_example_dir ${CMAKE_BINARY_DIR}/bin/examples/obj)
+file(MAKE_DIRECTORY ${bin_example_dir})
+file(MAKE_DIRECTORY ${obj_example_dir})
+# Find all lang files in the examples directory
+file(GLOB example_sources CONFIGURE_DEPENDS "examples/*.lang")
+# Generate build commands for each example
+set(build_example_commands "")
+foreach(example_source ${example_sources})
+    # Get file name without file path and extension
+    get_filename_component(example_name ${example_source} NAME_WE)
+    # Generate object file
+    add_custom_command(
+        OUTPUT ${obj_example_dir}/${example_name}.obj
+        COMMAND ${CMAKE_BINARY_DIR}/bin/lang ${example_source} 
+                    -o ${obj_example_dir}/${example_name}.obj
+        DEPENDS ${example_source}
+    )
+    # Generate executable
+    add_custom_command(
+        OUTPUT ${bin_example_dir}/${example_name}
+        COMMAND clang ${obj_example_dir}/${example_name}.obj 
+                    -o ${bin_example_dir}/${example_name}
+        DEPENDS ${obj_example_dir}/${example_name}.obj
+    )
+    list(APPEND build_example_commands ${bin_example_dir}/${example_name})
+endforeach()
+add_custom_target(
+    build_examples
+    DEPENDS ${build_example_commands}
+)
