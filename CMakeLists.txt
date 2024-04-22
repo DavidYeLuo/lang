@@ -98,7 +98,7 @@ foreach(example_source ${example_sources})
     # Generate executable
     add_custom_command(
         OUTPUT ${bin_example_dir}/${example_name}
-        COMMAND clang ${obj_example_dir}/${example_name}.obj 
+        COMMAND ${CMAKE_C_COMPILER} ${obj_example_dir}/${example_name}.obj 
                     -o ${bin_example_dir}/${example_name}
         DEPENDS ${obj_example_dir}/${example_name}.obj
     )
