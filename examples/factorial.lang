@@ -1,0 +1,9 @@
+def factorial = \int n -> int
+  if LT n 2
+    n
+  else
+    MUL n factorial(SUB n 1)
+
+def main = \IO io -> IO
+  let x = factorial(5) # should return 120
+  write(io x)

@@ -894,6 +894,7 @@ class BinOp : public Expr {
   enum OpKind {
     OK_Sub,
     OK_Add,
+    OK_Mul,
     OK_Lt,
     OK_Ge,
     OK_Eq,

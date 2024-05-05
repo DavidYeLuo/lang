@@ -723,6 +723,8 @@ llvm::Value *Compiler::getBinOp(llvm::IRBuilder<> &builder,
       return builder.CreateBinOp(llvm::Instruction::Sub, lhs, rhs);
     case BinOp::OK_Add:
       return builder.CreateBinOp(llvm::Instruction::Add, lhs, rhs);
+    case BinOp::OK_Mul:
+      return builder.CreateBinOp(llvm::Instruction::Mul, lhs, rhs);
     case BinOp::OK_Lt:
       return builder.CreateICmpSLT(lhs, rhs);
     case BinOp::OK_Ge:

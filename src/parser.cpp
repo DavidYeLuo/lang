@@ -673,6 +673,8 @@ Result<BinOp *> Parser::ParseBinOp(const Type *hint) {
     kind = BinOp::OK_Add;
   else if (res->isa(Token::TK_SUB))
     kind = BinOp::OK_Sub;
+  else if (res->isa(Token::TK_MUL))
+    kind = BinOp::OK_Mul;
   else if (res->isa(Token::TK_LT))
     kind = BinOp::OK_Lt;
   else if (res->isa(Token::TK_GE))
