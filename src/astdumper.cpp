@@ -239,6 +239,9 @@ void ASTDumper::Visit(const BinOp &binop) {
     case BinOp::OK_Add:
       op = "ADD";
       break;
+    case BinOp::OK_Mul:
+      op = "MUL";
+      break;
     case BinOp::OK_Lt:
       op = "LT";
       break;

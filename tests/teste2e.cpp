@@ -186,6 +186,11 @@ TEST(E2E, FibNonRecurse) {
   BuildAndCheckOutput(input, "55");
 }
 
+TEST(E2E, Factorial) {
+  std::ifstream input(EXAMPLES_DIR "/factorial.lang");
+  BuildAndCheckOutput(input, "120");
+}
+
 TEST(E2E, ProjectEuler1) {
   std::ifstream input(EXAMPLES_DIR "/project-euler-1.lang");
   BuildAndCheckOutput(input, "233168");
