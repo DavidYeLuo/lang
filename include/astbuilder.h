@@ -15,7 +15,7 @@ namespace lang {
 // management.
 class ASTBuilder {
  public:
-  ASTBuilder() : mutable_generic_(true), immutable_generic_(false) {}
+  ASTBuilder() = default;
 
   TypeDef &getTypeDef(const SourceLocation &start, std::string_view name,
                       const Type &alias) {
@@ -201,9 +201,8 @@ class ASTBuilder {
   StructGet &getStructGet(const SourceLocation &start, Expr &expr,
                           std::string_view member) {
     const Type &type = [&]() -> const Type & {
-      bool mut = expr.getType().isMutable();
       if (expr.getType().isGeneric())
-        return getGenericType(mut);
+        return getGenericType();
       return llvm::cast<StructType>(expr.getType()).getField(member);
     }();
     return getStructGet(start, type, expr, member);
@@ -244,28 +243,24 @@ class ASTBuilder {
         *types_.emplace_back(new CallableType(ret_type, arg_types)));
   }
 
-  const ArrayType &getArrayType(const Type &type, size_t num,
-                                bool mut = false) {
+  const ArrayType &getArrayType(const Type &type, size_t num) {
     return llvm::cast<ArrayType>(
-        *types_.emplace_back(new ArrayType(type, num, mut)));
+        *types_.emplace_back(new ArrayType(type, num)));
   }
 
-  const CompositeType &getCompositeType(const std::vector<const Type *> &types,
-                                        bool mut = false) {
+  const CompositeType &getCompositeType(
+      const std::vector<const Type *> &types) {
     return llvm::cast<CompositeType>(
-        *types_.emplace_back(new CompositeType(types, mut)));
+        *types_.emplace_back(new CompositeType(types)));
   }
 
-  const StructType &getStructType(const StructType::TypeMap &types,
-                                  bool mut = false) {
-    StructType *struct_ty = new StructType(types, mut);
+  const StructType &getStructType(const StructType::TypeMap &types) {
+    StructType *struct_ty = new StructType(types);
     types_.emplace_back(struct_ty);
     return *struct_ty;
   }
 
-  const GenericType &getGenericType(bool mut = false) {
-    return mut ? mutable_generic_ : immutable_generic_;
-  }
+  const GenericType &getGenericType() { return immutable_generic_; }
   const GenericRemainingType &getGenericRemainingType() {
     return generic_remaining_;
   }
@@ -274,7 +269,6 @@ class ASTBuilder {
   std::vector<std::unique_ptr<Node>> nodes_;
   std::vector<std::unique_ptr<const Type>> types_;
   std::map<std::string, const NamedType *, std::less<>> named_types_;
-  GenericType mutable_generic_;
   GenericType immutable_generic_;
   GenericRemainingType generic_remaining_;
 };

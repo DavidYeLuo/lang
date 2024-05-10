@@ -321,9 +321,9 @@ Result<Callable *> Parser::ParseCallable() {
   return ParseCallableBody(**callable_head);
 }
 
-// <type> ::= ( "mut" )? (<namedtype> | <callabletype> | <compositetype> |
-//                        <arraytype> | <generictype> | <genericremainingtype> |
-//                        <structtype>)
+// <type> ::= (<namedtype> | <callabletype> | <compositetype> |
+//             <arraytype> | <generictype> | <genericremainingtype> |
+//             <structtype>)
 //   <namedtype>              ::= <identifier>
 //   <callabletype>           ::= "\" <type>* "->" <type>
 //   <compositetype>          ::= "<" <type>+ ">"
@@ -335,13 +335,6 @@ Result<const Type *> Parser::ParseType() {
   Result<Token> res = lexer_.Lex();
   if (!res)
     return res;
-
-  bool mut = res->isa(Token::TK_Mut);
-  if (mut) {
-    res = lexer_.Lex();
-    if (!res)
-      return res;
-  }
 
   if (res->isa(Token::TK_Identifier)) {
     std::string_view type_name(res->getChars());
@@ -392,7 +385,7 @@ Result<const Type *> Parser::ParseType() {
         return res;
     } while (!res->isa(Token::TK_RAngleBrack));
     Consume(Token::TK_RAngleBrack);
-    return &builder_.getCompositeType(types, mut);
+    return &builder_.getCompositeType(types);
   } else if (res->isa(Token::TK_LCurlBrace)) {
     SourceLocation loc = res->getStart();
     res = lexer_.Peek();
@@ -434,7 +427,7 @@ Result<const Type *> Parser::ParseType() {
 
     Consume(Token::TK_RCurlBrace);
 
-    return &builder_.getStructType(fields, mut);
+    return &builder_.getStructType(fields);
   } else if (res->isa(Token::TK_LSqBrack)) {
     auto loc = lexer_.getCurrentLoc();
     Result<Int *> num = ParseInt();
@@ -468,10 +461,10 @@ Result<const Type *> Parser::ParseType() {
              << loc << ": Expected closing `]` for array type; instead found `"
              << res->getChars() << "`" << DumpLine{loc};
 
-    return &builder_.getArrayType(**type, static_cast<size_t>((*num)->getInt()),
-                                  mut);
+    return &builder_.getArrayType(**type,
+                                  static_cast<size_t>((*num)->getInt()));
   } else if (res->isa(Token::TK_GENERIC)) {
-    return &builder_.getGenericType(mut);
+    return &builder_.getGenericType();
   } else if (res->isa(Token::TK_GENERIC_REMAINING)) {
     return &builder_.getGenericRemainingType();
   }
@@ -752,7 +745,7 @@ Result<If *> Parser::ParseIf(const Type *hint) {
   // Ignore becuase even if only one of the branches is immutable, then the
   // return type can be immutable. Additionally, if the return type of whatever
   // function this is in is immutable, then we'll check against that.
-  if (!if_type.Equals(else_type, Type::QualifierCmp::Ignore)) {
+  if (!if_type.Equals(else_type)) {
     return getErrorDiag()
            << if_tok->getStart()
            << ": Mismatch type between if and else expressions; if expression "
@@ -1395,14 +1388,6 @@ Result<Set *> Parser::ParseSet() {
     return getErrorDiag() << aggregate.getStart()
                           << ": Expression is not a composite or array type"
                           << DumpLine{aggregate.getStart()};
-  }
-
-  if (!type.isMutable()) {
-    return getErrorDiag()
-           << loc << ": Attempting to SET type that is not marked as mutable"
-           << DumpLine{loc} << "\n"
-           << aggregate.getStart() << ": Expression to SET declared here"
-           << DumpLine{aggregate.getStart()};
   }
 
   Result<Expr *> idx_res = ParseAggregateIndexExpr(type, loc);

@@ -1,7 +1,7 @@
 # NOTE: `func` always returns the same value since it has no inputs, so 
 # this can effectively be evaluated at compile time.
 def func = \ -> <[128 x char]>
-  let chars = zero as mut [128 x char]
+  let chars = zero as [128 x char]
   let chars2 = SET chars 0 'a'
   let chars3 = SET chars2 1 'b'
   let chars4 = SET chars3 2 'c'

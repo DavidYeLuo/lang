@@ -61,7 +61,7 @@ typedef Lexer = {
   int col
 }
 
-#def getNextChar = \mut Lexer this -> <mut Lexer int>
+#def getNextChar = \Lexer this -> <Lexer int>
 #  # TODO: Something like this might be nice
 #  #
 #  #   let this.io = readc(this.io)
@@ -131,8 +131,8 @@ def skip_ws = \IO io int old_row int old_col -> <IO int int int>
 # - The last read character
 # - The row of the last read character
 # - The col of the last read character
-def __read_token_remaining = \IO io mut [128 x char] buff int idx int old_row int old_col ->
-                              <mut [128 x char] IO int int int>
+def __read_token_remaining = \IO io [128 x char] buff int idx int old_row int old_col ->
+                              <[128 x char] IO int int int>
   let io2, c, row, col = readc_row_col(io old_row old_col)
   if any(LT c 0
          EQ CAST char c ' '
@@ -156,8 +156,8 @@ def __read_token_remaining = \IO io mut [128 x char] buff int idx int old_row in
 # - The last read character
 # - The row of the last read character
 # - The col of the last read character
-def __read_string_token = \IO io mut [128 x char] buff int idx int old_row int old_col ->
-                                <mut [128 x char] IO int int int>
+def __read_string_token = \IO io [128 x char] buff int idx int old_row int old_col ->
+                                <[128 x char] IO int int int>
   let io2, c, row, col = readc_row_col(io old_row old_col)
   if OR
        LT c 0
@@ -214,8 +214,8 @@ def __read_string_token = \IO io mut [128 x char] buff int idx int old_row int o
 # - The last read character
 # - The row of the last read character
 # - The col of the last read character
-def __read_string_token = \IO io int old_row int old_col -> <mut [128 x char] IO int int int>
-  let buff = zero as mut [128 x char]
+def __read_string_token = \IO io int old_row int old_col -> <[128 x char] IO int int int>
+  let buff = zero as [128 x char]
   __read_string_token(io buff 0 old_row old_col)
 
 # Arguments:
@@ -266,7 +266,7 @@ def read_token = \IO io int old_row int old_col -> <[128 x char] IO int int int>
       GET skip_comment_res 3)
   else
 
-  let buff = zero as mut [128 x char]
+  let buff = zero as [128 x char]
 
   let res =
     if LT c 0
@@ -746,7 +746,7 @@ def main = \IO io -> IO
   keep failed_to_write_io =
     writeln(io___13 "failed to write add.obj: " failed_to_write)
 
-  let err_buff = zero as mut [1024 x char]
+  let err_buff = zero as [1024 x char]
   let err_buff_ptr = <CAST cptr err_buff>
 
   keep failed_to_write_obj = impurecall LLVMTargetMachineEmitToFile

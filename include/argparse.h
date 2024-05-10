@@ -21,6 +21,11 @@ namespace argparse {
 class ArgumentBase {
  public:
   virtual ~ArgumentBase() = default;
+
+  std::string_view getHelpText() const { return help_; }
+
+ private:
+  std::string help_;
 };
 
 template <typename T>
@@ -72,6 +77,9 @@ class ArgParser {
   ArgParser(int argc, char *const *argv, std::ostream &err)
       : argc_(static_cast<size_t>(argc)), argv_(argv), err_(err) {
     assert(argc > 0);
+
+    // Always have a --help option.
+    AddOptArg<bool>("help", 'h').setStoreTrue();
   }
   ArgParser(int argc, char *const *argv) : ArgParser(argc, argv, std::cerr) {}
 
@@ -117,7 +125,7 @@ class ArgParser {
       err_ << "Optional argument `" << argname << "` with short name `"
            << shortname << "` was already registered\n";
     }
-    return AddOptArg(argname);
+    return AddOptArg<T>(argname);
   }
 
   template <typename T = default_t>
@@ -220,6 +228,119 @@ class ArgParser {
   }
 
   size_t getNumPosArgs() const { return pos_args_.size(); }
+
+  // When printing --help, we shall never exceed this many characters when
+  // printing. The only exception to this will be if some inidividual token
+  // exceeds this limit.
+  static constexpr size_t kLineLimit = 80;
+
+  bool CheckAndMaybePrintHelp() {
+    if (!*get<bool>("help"))
+      return false;
+
+    struct HelpPrinter {
+      HelpPrinter(std::ostream &err) : err_(err) {}
+      ~HelpPrinter() { err_ << "\n"; }
+
+      HelpPrinter &operator<<(std::string_view s) {
+        PrintText(s);
+        return *this;
+      }
+
+      void setPadding(size_t padding) {
+        assert(padding < kLineLimit);
+        this->padding = padding;
+      }
+
+      void PrintText(std::string_view text) {
+        size_t start = 0, end = 0;
+        for (size_t i = 0; i < text.size(); ++i) {
+          char c = text[i];
+
+          if (isspace(c)) {
+            // Commit any prior token.
+            err_ << text.substr(start, end - start);
+
+            err_ << c;
+            if (c == '\n') {
+              err_ << std::string(padding, ' ');
+              line_pos = padding;
+            } else if (++line_pos >= kLineLimit) {
+              err_ << "\n";
+              err_ << std::string(padding, ' ');
+              line_pos = padding;
+            }
+
+            // Since this is whitespace, set the start of the token to print the
+            // next char in the text.
+            start = i + 1;
+            end = start;
+            continue;
+          }
+
+          ++end;
+          ++line_pos;
+        }
+
+        // Commit any remaining token.
+        err_ << text.substr(start, end - start);
+      }
+
+      std::ostream &err_;
+      size_t line_pos = 0;
+      size_t padding = 0;
+    };
+    HelpPrinter printer(err_);
+
+    // Tool usage and description.
+    printer << "Usage: " << argv_[0];
+    printer.setPadding(printer.line_pos);
+
+    for (std::string_view pos_arg_name : pos_args_) {
+      printer << " " << pos_arg_name;
+    }
+    for (std::string_view opt_arg_name : opt_args_) {
+      printer << " [--" << opt_arg_name << "]";
+    }
+
+    printer.setPadding(0);
+    printer << "\n\n";
+
+    auto print_args = [&](auto begin, auto end) {
+      for (auto it = begin; it != end; ++it) {
+        std::string_view arg_name(*it);
+        printer.setPadding(2);
+        printer << arg_name;
+
+        const ArgumentBase &arg = *arg_map_.find(arg_name)->second;
+        auto help_text = arg.getHelpText();
+        if (help_text.empty()) {
+          printer << "\n";
+          continue;
+        }
+
+        printer << ": ";
+        printer.setPadding(printer.line_pos);
+        printer << help_text << "\n";
+      }
+    };
+
+    // Positional arguments.
+    printer << "positional arguments:";
+    printer.setPadding(2);
+    printer << "\n";
+    print_args(pos_args_.begin(), pos_args_.end());
+    printer.setPadding(0);
+    printer << "\n";
+
+    // Optional arguments.
+    printer << "optional arguments:";
+    printer.setPadding(2);
+    printer << "\n";
+    print_args(opt_args_.begin(), opt_args_.end());
+
+    return true;
+  }
 
  private:
   template <typename T>

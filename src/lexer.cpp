@@ -23,7 +23,6 @@ const std::map<std::string, Token::TokenKind> kKeywordMap{
     {"let", Token::TK_Let},
     {"keep", Token::TK_Keep},
     {"as", Token::TK_As},
-    {"mut", Token::TK_Mut},
     {"zero", Token::TK_Zero},
     {"if", Token::TK_If},
     {"else", Token::TK_Else},

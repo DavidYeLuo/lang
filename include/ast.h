@@ -76,8 +76,6 @@ class Type {
 
   std::string toString() const {
     std::string s;
-    if (isMutable())
-      s += "mut ";
     s += toStringImpl();
     return s;
   }
@@ -92,27 +90,8 @@ class Type {
   bool isGenericCallable() const;
   bool isGenericRemainingCallable() const;
 
-  enum class QualifierCmp {
-    // Mutability must match exactly.
-    Exact,
-
-    // Ignore mutability when comparing.
-    Ignore,
-
-    // If the LHS is mutable, then the RHS must not be immutable because we'd
-    // lose const-ness.
-    RetainImmutability,
-  };
-
-  // Determins if this type can be mutated. Mainly the composite types use this.
-  virtual bool isMutable() const { return false; }
-  bool isImmutable() const { return !isMutable(); }
-  bool CheckQualifiers(const Type &rhs, QualifierCmp cmp) const;
-
-  bool operator==(const Type &other) const {
-    return Equals(other, QualifierCmp::Exact);
-  }
-  virtual bool Equals(const Type &, QualifierCmp cmp) const = 0;
+  bool operator==(const Type &other) const { return Equals(other); }
+  virtual bool Equals(const Type &) const = 0;
 
   bool CanConvertFrom(const Expr &e) const;
   bool CanConvertFrom(const Type &t) const;
@@ -131,20 +110,16 @@ class Type {
 
 class GenericType : public Type {
  public:
-  GenericType(bool mut = false) : Type(TK_GenericType), mutable_(mut) {}
+  GenericType(bool mut = false) : Type(TK_GenericType) {}
   bool isGeneric() const override { return true; }
-  bool isMutable() const override { return mutable_; }
 
   static bool classof(const Type *type) {
     return type->getKind() == TK_GenericType;
   }
-  bool Equals(const Type &other, QualifierCmp) const override;
+  bool Equals(const Type &other) const override;
 
  protected:
   std::string toStringImpl() const override { return "GENERIC"; }
-
- private:
-  bool mutable_;
 };
 
 class GenericRemainingType : public Type {
@@ -155,7 +130,7 @@ class GenericRemainingType : public Type {
   static bool classof(const Type *type) {
     return type->getKind() == TK_GenericRemainingType;
   }
-  bool Equals(const Type &other, QualifierCmp) const override;
+  bool Equals(const Type &other) const override;
 
  protected:
   std::string toStringImpl() const override { return "GENERIC_REMAINING"; }
@@ -170,7 +145,7 @@ class NamedType : public Type {
   static bool classof(const Type *type) {
     return type->getKind() == TK_NamedType;
   }
-  bool Equals(const Type &other, QualifierCmp) const override;
+  bool Equals(const Type &other) const override;
 
  protected:
   std::string toStringImpl() const override { return name_; }
@@ -210,7 +185,7 @@ class CallableType : public Type {
   bool CanApplyArgs(const std::vector<Expr *> &args) const {
     return CanApplyArgs(std::span{args.begin(), args.size()});
   }
-  bool Equals(const Type &other, QualifierCmp) const override;
+  bool Equals(const Type &other) const override;
 
  protected:
   std::string toStringImpl() const override {
@@ -231,7 +206,7 @@ bool CanApplyArgs(std::span<const Type *const> args1,
 class ArrayType : public Type {
  public:
   ArrayType(const Type &type, size_t num, bool mut = false)
-      : Type(TK_ArrayType), type_(type), num_(num), mutable_(mut) {}
+      : Type(TK_ArrayType), type_(type), num_(num) {}
 
   static bool classof(const Type *type) {
     return type->getKind() == TK_ArrayType;
@@ -240,8 +215,7 @@ class ArrayType : public Type {
   bool isGeneric() const override { return type_.isGeneric(); }
   size_t getNumElems() const { return num_; }
   const Type &getElemType() const { return type_; }
-  bool isMutable() const override { return mutable_; }
-  bool Equals(const Type &other, QualifierCmp) const override;
+  bool Equals(const Type &other) const override;
 
  protected:
   std::string toStringImpl() const override {
@@ -251,21 +225,18 @@ class ArrayType : public Type {
  private:
   const Type &type_;
   const size_t num_;
-  const bool mutable_;
 };
 
 class CompositeType : public Type {
  public:
   CompositeType(const std::vector<const Type *> &types, bool mut = false)
-      : Type(TK_CompositeType), types_(types), mutable_(mut) {
+      : Type(TK_CompositeType), types_(types) {
     assert(!types.empty());
   }
 
   static bool classof(const Type *type) {
     return type->getKind() == TK_CompositeType;
   }
-
-  bool isMutable() const override { return mutable_; }
 
   const auto &getTypes() const { return types_; }
   size_t getNumTypes() const { return types_.size(); }
@@ -274,7 +245,7 @@ class CompositeType : public Type {
     return std::ranges::any_of(types_,
                                [](const Type *ty) { return ty->isGeneric(); });
   }
-  bool Equals(const Type &other, QualifierCmp) const override;
+  bool Equals(const Type &other) const override;
 
  protected:
   std::string toStringImpl() const override {
@@ -285,14 +256,13 @@ class CompositeType : public Type {
 
  private:
   const std::vector<const Type *> types_;
-  const bool mutable_;
 };
 
 class StructType : public Type {
  public:
   using TypeMap = std::map<std::string, const Type *, std::less<>>;
   StructType(const TypeMap &types, bool mut = false)
-      : Type(TK_StructType), types_(types), mutable_(mut) {
+      : Type(TK_StructType), types_(types) {
     assert(!types.empty());
     assert(AllUniqueNames(types) && "Found duplicate member names");
   }
@@ -300,8 +270,6 @@ class StructType : public Type {
   static bool classof(const Type *type) {
     return type->getKind() == TK_StructType;
   }
-
-  bool isMutable() const override { return mutable_; }
 
   const auto &getTypes() const { return types_; }
   bool hasField(std::string_view name) const { return types_.contains(name); }
@@ -328,7 +296,7 @@ class StructType : public Type {
     return std::any_of(types_.begin(), types_.end(),
                        [](auto it) { return it.second->isGeneric(); });
   }
-  bool Equals(const Type &other, QualifierCmp) const override;
+  bool Equals(const Type &other) const override;
 
  protected:
   std::string toStringImpl() const override {
@@ -350,7 +318,6 @@ class StructType : public Type {
   }
 
   const TypeMap types_;
-  const bool mutable_;
 };
 
 class TypeDef : public Node {
@@ -385,7 +352,7 @@ class Expr : public Node {
   const Type &getType() const { return type_; }
   const auto &getUsers() const { return users_; }
   auto &getUsers() { return users_; }
-  bool hasUsers() { return !users_.empty(); }
+  bool hasUsers() const { return !users_.empty(); }
   void AddUser(Expr &e) { users_.insert(&e); }
   void RemoveUser(Expr &e) {
     assert(users_.contains(&e));
@@ -708,6 +675,10 @@ class Readc : public Expr {
   Readc(const SourceLocation &start, const Type &type)
       : Expr(NK_Readc, start, type) {
     assert(IsReadcType(type));
+  }
+
+  const CallableType &getType() const {
+    return llvm::cast<CallableType>(Expr::getType());
   }
 
   static bool classof(const Node *node) { return node->getKind() == NK_Readc; }

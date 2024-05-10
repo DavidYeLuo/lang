@@ -6,18 +6,6 @@
 
 namespace lang {
 
-bool Type::CheckQualifiers(const Type &rhs, QualifierCmp cmp) const {
-  switch (cmp) {
-    case QualifierCmp::Exact:
-      return isMutable() == rhs.isMutable();
-    case QualifierCmp::Ignore:
-      return true;
-    case QualifierCmp::RetainImmutability:
-      return !isMutable() || rhs.isMutable();
-  }
-  __builtin_unreachable();
-}
-
 bool Type::isAggregateType() const {
   return llvm::isa<CompositeType>(this) || llvm::isa<ArrayType>(this) ||
          llvm::isa<StructType>(this) || isGeneric();
@@ -27,43 +15,32 @@ bool Type::isStructType() const {
   return llvm::isa<StructType>(this) || isGeneric();
 }
 
-bool GenericType::Equals(const Type &other, QualifierCmp cmp) const {
-  return CheckQualifiers(other, cmp) && llvm::isa<GenericType>(other);
+bool GenericType::Equals(const Type &other) const {
+  return llvm::isa<GenericType>(other);
 }
 
-bool GenericRemainingType::Equals(const Type &other, QualifierCmp) const {
-  // Don't check the qualifiers since a GENERIC_REMAINING can have any
-  // qualifiers.
+bool GenericRemainingType::Equals(const Type &other) const {
   return llvm::isa<GenericRemainingType>(other);
 }
 
-bool NamedType::Equals(const Type &rhs, QualifierCmp cmp) const {
-  if (!CheckQualifiers(rhs, cmp))
-    return false;
-
+bool NamedType::Equals(const Type &rhs) const {
   if (const auto *named_rhs = llvm::dyn_cast<NamedType>(&rhs))
     return getName() == named_rhs->getName();
 
   return false;
 }
 
-bool ArrayType::Equals(const Type &rhs, QualifierCmp cmp) const {
-  if (!CheckQualifiers(rhs, cmp))
-    return false;
-
+bool ArrayType::Equals(const Type &rhs) const {
   if (const auto *array_rhs = llvm::dyn_cast<ArrayType>(&rhs)) {
     if (getNumElems() != array_rhs->getNumElems())
       return false;
 
-    return getElemType().Equals(array_rhs->getElemType(), cmp);
+    return getElemType().Equals(array_rhs->getElemType());
   }
   return false;
 }
 
-bool StructType::Equals(const Type &rhs, QualifierCmp cmp) const {
-  if (!CheckQualifiers(rhs, cmp))
-    return false;
-
+bool StructType::Equals(const Type &rhs) const {
   if (const auto *struct_rhs = llvm::dyn_cast<StructType>(&rhs)) {
     if (getNumTypes() != struct_rhs->getNumTypes())
       return false;
@@ -73,7 +50,7 @@ bool StructType::Equals(const Type &rhs, QualifierCmp cmp) const {
       if (!struct_rhs->hasField(name))
         return false;
 
-      if (!getField(name).Equals(struct_rhs->getField(name), cmp))
+      if (!getField(name).Equals(struct_rhs->getField(name)))
         return false;
     }
 
@@ -82,16 +59,13 @@ bool StructType::Equals(const Type &rhs, QualifierCmp cmp) const {
   return false;
 }
 
-bool CompositeType::Equals(const Type &rhs, QualifierCmp cmp) const {
-  if (!CheckQualifiers(rhs, cmp))
-    return false;
-
+bool CompositeType::Equals(const Type &rhs) const {
   if (const auto *composite_rhs = llvm::dyn_cast<CompositeType>(&rhs)) {
     if (getTypes().size() != composite_rhs->getTypes().size())
       return false;
 
     for (size_t i = 0; i < getTypes().size(); ++i) {
-      if (!getTypeAt(i).Equals(composite_rhs->getTypeAt(i), cmp))
+      if (!getTypeAt(i).Equals(composite_rhs->getTypeAt(i)))
         return false;
     }
 
@@ -100,20 +74,17 @@ bool CompositeType::Equals(const Type &rhs, QualifierCmp cmp) const {
   return false;
 }
 
-bool CallableType::Equals(const Type &rhs, QualifierCmp cmp) const {
-  if (!CheckQualifiers(rhs, cmp))
-    return false;
-
+bool CallableType::Equals(const Type &rhs) const {
   if (const auto *callable_rhs = llvm::dyn_cast<CallableType>(&rhs)) {
     if (getArgTypes().size() != callable_rhs->getArgTypes().size())
       return false;
 
     for (size_t i = 0; i < getArgTypes().size(); ++i) {
-      if (!getArgTypes().at(i)->Equals(*callable_rhs->getArgTypes().at(i), cmp))
+      if (!getArgTypes().at(i)->Equals(*callable_rhs->getArgTypes().at(i)))
         return false;
     }
 
-    return getReturnType().Equals(callable_rhs->getReturnType(), cmp);
+    return getReturnType().Equals(callable_rhs->getReturnType());
   }
   return false;
 }
@@ -181,11 +152,6 @@ bool CanApplyArgs(std::span<const Type *const> args1,
 
     if (!args1[i]->CanConvertFrom(*args2[i]))
       return false;
-
-    // The paramater type is mutable so the argument passed here must also be
-    // mutable.
-    if (args1[i]->isMutable() && !args2[i]->isMutable())
-      return false;
   }
 
   return true;
@@ -201,15 +167,18 @@ bool CallableType::CallableTypesMatch(const CallableType &rhs) const {
 
 bool Type::Matches(const Type &other) const {
   if (const auto *this_callable_ty = llvm::dyn_cast<CallableType>(this)) {
-    if (const auto *other_callable_ty = llvm::dyn_cast<CallableType>(&other)) {
+    if (const auto *other_callable_ty = llvm::dyn_cast<CallableType>(&other))
       return this_callable_ty->CallableTypesMatch(*other_callable_ty);
-    }
   }
 
+  // FIXME: This isn't inherently true. We have this check specifically for
+  // doing early type checking during the parsing stage. This type of logic
+  // should probably be moved to the parser rather than have it part of the
+  // type class.
   if (other.isGeneric() || isGeneric())
-    return isMutable() == other.isMutable();
+    return true;
 
-  return Equals(other, QualifierCmp::RetainImmutability);
+  return Equals(other);
 }
 
 void Module::MangleDecls() {
@@ -301,9 +270,6 @@ bool Type::CanConvertFrom(const Expr &e) const {
 }
 
 bool Type::CanConvertFrom(const Type &from) const {
-  if (isMutable() && !from.isMutable())
-    return false;
-
   // Any type can be converted to a generic type.
   //
   // Likewise, we do not know enough about converting from a generic type to a
@@ -311,7 +277,7 @@ bool Type::CanConvertFrom(const Type &from) const {
   if (isGeneric() || from.isGeneric())
     return true;
 
-  return Equals(from, QualifierCmp::RetainImmutability);
+  return Equals(from);
 }
 
 void Module::AddTypeDef(std::string_view name, const Type &type) {
@@ -342,7 +308,6 @@ Set::Set(const SourceLocation &start, Expr &expr, Expr &idx, Expr &store)
       expr_(expr),
       idx_(idx),
       store_(store) {
-  assert(expr.getType().isMutable());
   assert(expr.getType().isAggregateType());
   assert(idx.getType().isNamedType("int"));
 

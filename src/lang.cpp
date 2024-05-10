@@ -20,6 +20,9 @@ int main(int argc, char **argv) {
   argparser.AddOptArg<bool>("sanitize-address").setStoreTrue();
   argparser.AddOptArg("output", 'o');
 
+  if (argparser.CheckAndMaybePrintHelp())
+    return 0;
+
   auto f = argparser.get("file");
   if (!f)
     return 1;

@@ -12,6 +12,9 @@
 
 namespace {
 
+// TODO: It would be nice if we could use something like lit + FileCheck here
+// since this is explicitly checking IR.
+
 // Test that we do not create new buffers when they are reused as the first
 // argument. That is, the buffer.lang example should look something like this:
 //
@@ -19,12 +22,9 @@ namespace {
 //   define i32 @main_impl(i32 %io) {
 //   entry:
 //     %buff = alloca [3 x [4 x i8]]
-//     call void @llvm.memset.p0.i64(ptr %buff, i8 0, i64 12, i1 false)
-//     %buff2 = call ptr @write***(ptr %buff, i32 0, ptr @3)
-//     %buff3 = call ptr @write***(ptr %buff2, i32 1, ptr @4)
-//     %buff4 = call ptr @write***(ptr %buff3, i32 2, ptr @5)
-//     %0 = call i32 @read...(i32 %io, ptr %buff4, i32 0)
-//     ret i32 %0
+//     ... do some stores
+//     ... do some prints
+//     ret i32 0
 //   }
 // ```
 //
@@ -32,6 +32,8 @@ namespace {
 // first function, so the first function can just reuse the space for that
 // argument. The same applies for the return values which are passed as
 // arguments to the next function.
+//
+// LLVM optimization passes should take care of this for us.
 TEST(Compiler, ReuseFirstArgument) {
   std::ifstream input(EXAMPLES_DIR "/buffer.lang");
   lang::Lexer lexer(input);
@@ -42,25 +44,28 @@ TEST(Compiler, ReuseFirstArgument) {
   lang::ASTBuilder builder;
   lang::Lower(mod, builder);
   std::stringstream ss;
-  ASSERT_TRUE(lang::Compile(mod, ss, lang::DumpType::IR, /*modname=*/""));
+  ASSERT_TRUE(lang::Compile(mod, ss, lang::DumpType::IR, /*modname=*/"",
+                            /*source=*/"", llvm::OptimizationLevel::O3));
 
+  // NOTE: @main_impl will get optimized out and its body will be inlined into
+  // @main.
   std::string ir = ss.str();
-  auto found_main_impl_def = ir.find("define i32 @main_impl");
+  auto found_main_impl_def = ir.find("define i32 @main");
   ASSERT_NE(found_main_impl_def, std::string::npos)
-      << "Couldn't find `main_impl` definition";
+      << "Couldn't find `main` definition";
 
   constexpr std::string_view kAlloca = "alloca";
   auto found_alloca = ir.find(kAlloca, found_main_impl_def);
   ASSERT_NE(found_alloca, std::string::npos)
       << "Couldn't find alloca in `main_impl` definition";
 
-  auto found_first_write = ir.find("@write", found_alloca);
-  ASSERT_NE(found_first_write, std::string::npos)
+  auto found_first_ret = ir.find("ret", found_alloca);
+  ASSERT_NE(found_first_ret, std::string::npos)
       << "Couldn't find call to `write` following alloca";
 
   auto found_other_alloca = ir.find(kAlloca, found_alloca + kAlloca.size());
   if (found_other_alloca != std::string::npos) {
-    ASSERT_GT(found_other_alloca, found_first_write)
+    ASSERT_GT(found_other_alloca, found_first_ret)
         << "Found more than one alloca";
   }
 }
@@ -93,11 +98,11 @@ TEST(Compiler, Regression3) {
   ASSERT_TRUE(lang::Compile(mod, ss, lang::DumpType::IR, /*modname=*/""));
 
   std::string ir = ss.str();
-  auto found_consume_def = ir.find("define void @consume");
+  auto found_consume_def = ir.find("define ptr @consume");
   ASSERT_NE(found_consume_def, std::string::npos)
       << "Couldn't find `consume` definition";
 
-  constexpr std::string_view kReadToken = "call void @read_token";
+  constexpr std::string_view kReadToken = "call ptr @read_token";
   auto found_read_token = ir.find(kReadToken, found_consume_def);
   ASSERT_NE(found_read_token, std::string::npos)
       << "Couldn't find read_token call in `consume` definition";
