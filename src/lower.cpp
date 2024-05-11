@@ -127,8 +127,6 @@ class ASTLowerer : public NonConstASTVisitor<> {
     Visit(if_expr.getElse());
   }
 
-  void Visit(Let &let) { Visit(let.getExpr()); }
-
   void Visit(Keep &keep) {
     Visit(keep.getExpr());
     Visit(keep.getBody());

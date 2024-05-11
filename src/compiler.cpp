@@ -82,7 +82,6 @@ class Compiler {
   llvm::Value *getBoolExpr(llvm::IRBuilder<> &builder, const Expr &expr);
   llvm::Value *getCallable(llvm::IRBuilder<> &builder,
                            const Callable &callable);
-  llvm::Value *getLet(llvm::IRBuilder<> &builder, const Let &let);
   llvm::Value *getKeep(llvm::IRBuilder<> &builder, const Keep &keep);
   llvm::Value *getCall(llvm::IRBuilder<> &builder, const Call &call);
   llvm::Value *getZero(llvm::IRBuilder<> &, const Zero &);
@@ -233,9 +232,6 @@ class Compiler {
     // If the types don't match, this can't possibly be what we return.
     if (expr.getType() != callable_body.getType())
       return false;
-
-    if (const auto *let = llvm::dyn_cast<Let>(&callable_body))
-      return CanBeStorageForReturnValue(let->getExpr(), expr);
 
     if (const auto *keep = llvm::dyn_cast<Keep>(&callable_body))
       return CanBeStorageForReturnValue(keep->getBody(), expr);
@@ -637,12 +633,6 @@ void Compiler::FillFuncBody(const Callable &callable, llvm::Function *func,
   this_callable_ = old_callable;
 }
 
-llvm::Value *Compiler::getLet(llvm::IRBuilder<> &builder, const Let &let) {
-  llvm::Value *val = getExpr(builder, let.getExpr());
-  val->setName(let.getName());
-  return val;
-}
-
 llvm::Value *Compiler::getKeep(llvm::IRBuilder<> &builder, const Keep &keep) {
   llvm::Value *val = getExpr(builder, keep.getExpr());
   if (!val->getType()->isVoidTy())
@@ -673,9 +663,6 @@ llvm::Value *Compiler::getExpr(llvm::IRBuilder<> &builder, const Expr &expr) {
       llvm::DILocation::get(di_unit_.getContext(), expr.getStart().getRow(),
                             expr.getStart().getCol(), func->getSubprogram()));
 
-  if (llvm::isa<Let>(expr))
-    return getExprImpl(builder, expr);
-
   auto found = processed_exprs_.find(&expr);
   if (found != processed_exprs_.end())
     return found->second;
@@ -701,6 +688,9 @@ llvm::Value *Compiler::getExpr(llvm::IRBuilder<> &builder, const Expr &expr) {
   processed_exprs_[&expr] = res;
   tmp->replaceAllUsesWith(res);
   tmp->eraseFromParent();
+
+  if (expr.hasName())
+    res->setName(expr.getName());
   return res;
 }
 
@@ -735,8 +725,6 @@ llvm::Value *Compiler::getExprImpl(llvm::IRBuilder<> &builder,
       return getChar(builder, llvm::cast<Char>(expr));
     case Node::NK_Call:
       return getCall(builder, llvm::cast<Call>(expr));
-    case Node::NK_Let:
-      return getLet(builder, llvm::cast<Let>(expr));
     case Node::NK_Keep:
       return getKeep(builder, llvm::cast<Keep>(expr));
     case Node::NK_Callable:

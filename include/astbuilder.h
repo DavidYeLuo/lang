@@ -96,10 +96,6 @@ class ASTBuilder {
     return llvm::cast<Cast>(*nodes_.emplace_back(new Cast(start, type, expr)));
   }
 
-  Let &getLet(const SourceLocation &start, std::string_view name, Expr &expr) {
-    return llvm::cast<Let>(*nodes_.emplace_back(new Let(start, name, expr)));
-  }
-
   Keep &getKeep(const SourceLocation &start, std::string_view name, Expr &expr,
                 Expr &body) {
     return llvm::cast<Keep>(
