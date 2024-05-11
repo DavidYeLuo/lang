@@ -76,9 +76,6 @@ class GenericResolver : public NonConstASTVisitor<Node &> {
 inline Declare *ExtractDeclare(Expr &expr) {
   if (auto *decl = llvm::dyn_cast<Declare>(&expr))
     return decl;
-  else if (auto *let = llvm::dyn_cast<Let>(&expr))
-    return ExtractDeclare(let->getExpr());
-  // Cannot get a declare from this.
   return nullptr;
 }
 

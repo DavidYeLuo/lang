@@ -192,11 +192,6 @@ Node &GenericResolver::Visit(Arg &arg) {
   return getNewCallable().getArg(arg.getArgNo());
 }
 
-Node &GenericResolver::Visit(Let &let) {
-  return builder_.getLet(let.getStart(), let.getName(),
-                         VisitExpr(let.getExpr()));
-}
-
 Node &GenericResolver::Visit(Readc &readc) {
   return builder_.getReadc(readc.getStart());
 }

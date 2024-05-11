@@ -41,13 +41,6 @@ void ASTDumper::Visit(const Declare &declare) {
   }
 }
 
-void ASTDumper::Visit(const Let &let) {
-  Pad() << "Let name=" << let.getName() << " " << &let << "\n";
-  Indent();
-  Visit(let.getExpr());
-  Dedent();
-}
-
 void ASTDumper::Visit(const Keep &keep) {
   Pad() << "Keep name=" << keep.getName() << " " << &keep << "\n";
   Indent();
@@ -81,6 +74,8 @@ void ASTDumper::Visit(const Callable &callable) {
   Dedent();
 }
 
+// TODO: Since we removed `let`, we will need to print expression names if there
+// are any.
 void ASTDumper::Visit(const Cast &cast) {
   Pad() << "Cast " << &cast << " " << cast.getType().toString() << "\n";
   Indent();

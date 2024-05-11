@@ -359,6 +359,10 @@ class Expr : public Node {
     users_.erase(&e);
   }
 
+  bool hasName() const { return !name_.empty(); }
+  std::string_view getName() const { return name_; }
+  void setName(std::string_view name) { name_ = name; }
+
   Expr &getOwner() const { return *owner_; }
   bool hasOwner() const { return owner_; }
   void setOwner(Expr &owner) {
@@ -380,6 +384,7 @@ class Expr : public Node {
   const Type &type_;
   std::set<Expr *> users_;
   Expr *owner_;
+  std::string name_;
 };
 
 // A declaration is a named value that may be defined outside this module. If it
@@ -529,24 +534,6 @@ class Get : public Expr {
 
  private:
   Expr &expr_, &idx_;
-};
-
-class Let : public Expr {
- public:
-  Let(const SourceLocation &start, std::string_view name, Expr &expr)
-      : Expr(NK_Let, start, expr.getType()), name_(name), expr_(expr) {
-    expr.AddUser(*this);
-  }
-
-  std::string_view getName() const { return name_; }
-  const Expr &getExpr() const { return expr_; }
-  Expr &getExpr() { return expr_; }
-
-  static bool classof(const Node *node) { return node->getKind() == NK_Let; }
-
- private:
-  std::string name_;
-  Expr &expr_;
 };
 
 class Keep : public Expr {

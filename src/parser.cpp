@@ -918,12 +918,12 @@ Result<Expr *> Parser::ParseLet(const Type *hint) {
       const Type &type = comp_ty->getTypeAt(i);
       Int &idx = builder_.getInt(expr.getStart(), static_cast<int>(i));
       Get &get = builder_.getGet(expr.getStart(), type, expr, idx);
-      Let &let = builder_.getLet(id_locs.at(i), unpack_ids.at(i), get);
-      RegisterLocalVar(unpack_ids.at(i), let);
+      get.setName(unpack_ids.at(i));
+      RegisterLocalVar(unpack_ids.at(i), get);
     }
   } else {
-    Let &let = builder_.getLet(let_loc, name, expr);
-    RegisterLocalVar(name, let);
+    expr.setName(name);
+    RegisterLocalVar(name, expr);
   }
 
   Result<Expr *> body_res = ParseExpr(hint);
