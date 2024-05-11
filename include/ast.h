@@ -341,6 +341,11 @@ class Expr : public Node {
  public:
   Expr(Kind kind, const SourceLocation &start, const Type &type)
       : Node(kind, start), type_(type), owner_(nullptr) {}
+  Expr(Kind kind, const SourceLocation &start, const Type &type,
+       std::string_view name)
+      : Expr(kind, start, type) {
+    name_ = name;
+  }
 
   static bool classof(const Node *node) {
     return NK_ExprFirst <= node->getKind() && node->getKind() <= NK_ExprLast;
@@ -393,23 +398,19 @@ class Declare : public Expr {
  public:
   Declare(const SourceLocation &start, std::string_view name, const Type &type,
           bool is_builtin_write, bool is_cdecl)
-      : Expr(NK_Declare, start, type),
-        name_(name),
+      : Expr(NK_Declare, start, type, name),
         body_(nullptr),
         builtin_write_(is_builtin_write),
         is_cdecl_(is_cdecl) {}
   Declare(const SourceLocation &start, std::string_view name, Expr &expr,
           bool is_builtin_write, bool is_cdecl)
-      : Expr(NK_Declare, start, expr.getType()),
-        name_(name),
+      : Expr(NK_Declare, start, expr.getType(), name),
         body_(&expr),
         builtin_write_(is_builtin_write),
         is_cdecl_(is_cdecl) {
     expr.AddUser(*this);
   }
 
-  std::string_view getName() const { return name_; }
-  void setName(std::string_view name) { name_ = name; }
   bool isDefinition() const { return body_; }
   bool isBuiltinWrite() const { return builtin_write_; }
   bool isCDecl() const { return is_cdecl_; }
@@ -428,7 +429,6 @@ class Declare : public Expr {
   }
 
  private:
-  std::string name_;
   Expr *body_;
 
   // This is used to indicate to the compiler this should generate a printf.
@@ -540,15 +540,11 @@ class Keep : public Expr {
  public:
   Keep(const SourceLocation &start, std::string_view name, Expr &expr,
        Expr &body)
-      : Expr(NK_Keep, start, body.getType()),
-        name_(name),
-        expr_(expr),
-        body_(body) {
+      : Expr(NK_Keep, start, body.getType(), name), expr_(expr), body_(body) {
     expr.AddUser(*this);
     body.AddUser(*this);
   }
 
-  std::string_view getName() const { return name_; }
   const Expr &getExpr() const { return expr_; }
   const Expr &getBody() const { return body_; }
   Expr &getExpr() { return expr_; }
@@ -557,7 +553,6 @@ class Keep : public Expr {
   static bool classof(const Node *node) { return node->getKind() == NK_Keep; }
 
  private:
-  std::string name_;
   Expr &expr_, &body_;
 };
 
