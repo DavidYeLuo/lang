@@ -132,7 +132,7 @@ class Compiler {
   // Say we have a declaration:
   //
   //   decl func = \<comp-or-arr-type> a <integer> b <char array> c ->
-  //   <comp-or-arr-type>
+  //                <comp-or-arr-type>
   //
   // We need to determine the calling convention. How do we return composite or
   // array types? How do we know if we can mutate or SET any of the parameters?
@@ -145,21 +145,38 @@ class Compiler {
     // pointers, etc). No changes are needed for the function.
     ReturnNormalType,
 
-    // The return type should be void and instead the caller allocates a buffer
+    // The return type should be a pointer and the caller allocates a buffer
     // for enough space for the lang return type. The function is changed such
     // that a pointer to this buffer will be the actual return type and the
     // actual arguments come after it. This is reserved for array or composite
     // types.
-    ReturnAsFirstArg,
-
-    // The return type should be a pointer and the return value is just the
-    // first argument to the function. This is reserved for array and composite
-    // types where we know the only thing that changed is the first argument and
-    // we end up returning only the first argument.
     //
-    // NOTE: We can only do this if we know for sure the first argument is
-    // mutable (ie. not constant).
-    ReturnFirstArgInPlace,
+    // Given a signature:
+    //
+    //   decl func = \[4 x char] s bool cond -> [4 x char]
+    //
+    // we don't have a way to tell if the function does an alloca. It could be
+    //
+    //   def func = \[4 x char] s bool cond -> [4 x char]
+    //     if cond s else zero as [4 x char]
+    //
+    // which doesn't need an alloca before the call or
+    //
+    //   def func = \[4 x char] s bool cond -> [4 x char]
+    //     SET s 1 if cond 'a' 'b'
+    //
+    // which does need an alloca before the call. The all-encompassing case
+    // would be unconditionally assume an allocation is needed and bear the cost
+    // of the alloca. Runtime-wise, it shouldn't add any more instructions since
+    // all allocas are consolidated into a single stack pointer decrement. But
+    // this could result in a lot of unecessary stack usage for large objects.
+    // The alternative is we could have something like a unique_ptr and the
+    // actual object would be on the heap. The caller would only need to
+    // allocate space for the unique_ptr size which can be constant.
+    MayReturnFirstArg,
+
+    // TODO: We should have a special strategy for functions with no arguments.
+    // It should be possible to construct a global and just return that.
   };
 
   ReturnStrategy getCallableReturnStrategy(const CallableType &type) const {
@@ -170,14 +187,7 @@ class Compiler {
     if (!ret.isAggregateType())
       return ReturnNormalType;
 
-    // However, since this callable now owns all of the expressions passed it
-    // it, if the very first allocation has the exact same type as the return
-    // type, then we can just return the first argument as a pointer and make
-    // any local edits to that.
-    if (type.getNumArgs() > 0 && ret.CanConvertFrom(type.getArgType(0)))
-      return ReturnFirstArgInPlace;
-
-    return ReturnAsFirstArg;
+    return MayReturnFirstArg;
   }
 
   llvm::Function *getCPrintf() const;
@@ -198,7 +208,10 @@ class Compiler {
   // This exists to handle PHI nodes where calling Value::replaceAllUsesWith
   // doesn't also replace the incoming values of the phi node with the
   // replacement.
-  void ReplaceAllUsesWith(llvm::Value *replacement, llvm::Value *replacing);
+  //
+  // Returns the actual value the LLVM function should return.
+  llvm::Value *ReplaceAllocasWith(llvm::Value *replacement,
+                                  llvm::Value *replacing);
 
   // This also handles storing large data structures like composites or arrays
   // into pointers which will involve memcpys.
@@ -207,6 +220,46 @@ class Compiler {
 
   void FillFuncBody(const Callable &callable, llvm::Function *func,
                     std::string_view name);
+
+  // This should be checked whenever we want to do an alloca. If at any point we
+  // would want to alloca, we should attempt to reuse the first argument if we
+  // know the return strategy involves returning the first argument.
+  bool CanBeStorageForReturnValue(const Expr &callable_body,
+                                  const Expr &expr) const {
+    // These are the same expressions so the storage is the same.
+    if (&expr == &callable_body)
+      return true;
+
+    // If the types don't match, this can't possibly be what we return.
+    if (expr.getType() != callable_body.getType())
+      return false;
+
+    if (const auto *let = llvm::dyn_cast<Let>(&callable_body))
+      return CanBeStorageForReturnValue(let->getExpr(), expr);
+
+    if (const auto *keep = llvm::dyn_cast<Keep>(&callable_body))
+      return CanBeStorageForReturnValue(keep->getBody(), expr);
+
+    if (const auto *if_expr = llvm::dyn_cast<If>(&callable_body)) {
+      return CanBeStorageForReturnValue(if_expr->getIf(), expr) ||
+             CanBeStorageForReturnValue(if_expr->getElse(), expr);
+    }
+
+    return false;
+  }
+
+  llvm::Value *GetAllocaOrReturnValStorage(llvm::IRBuilder<> &builder,
+                                           const Expr &expr) {
+    ReturnStrategy return_strat =
+        getCallableReturnStrategy(this_callable_->getType());
+    if (return_strat == MayReturnFirstArg &&
+        CanBeStorageForReturnValue(this_callable_->getBody(), expr)) {
+      llvm::Function *func = llvm::cast<llvm::Function>(
+          processed_exprs_.find(this_callable_)->second);
+      return func->getArg(0);
+    }
+    return builder.CreateAlloca(getLLVMType(expr));
+  }
 
   llvm::DIType *getDIType(const Type &type) {
     switch (type.getKind()) {
@@ -224,6 +277,7 @@ class Compiler {
   std::unique_ptr<NamedType> io_type_;
   std::unique_ptr<NamedType> str_type_;
   std::map<const Node *, llvm::Value *> processed_exprs_;
+  const Callable *this_callable_ = nullptr;
   llvm::DIBuilder di_builder_;
   llvm::DIFile &di_unit_;
   llvm::DICompileUnit &di_cu_;
@@ -357,7 +411,7 @@ llvm::Value *Compiler::getDeclare(const Declare &declare) {
 // actual `main` then dispatch to this function.
 llvm::Function *Compiler::getMainWrapper(llvm::FunctionType *func_ty) const {
   llvm::Function *impl_func = llvm::Function::Create(
-      func_ty, llvm::Function::ExternalLinkage, "main_impl", mod_);
+      func_ty, llvm::Function::PrivateLinkage, "main_impl", mod_);
 
   llvm::FunctionType *main_func_ty =
       llvm::FunctionType::get(getIntType(32), {}, /*isVarArg=*/false);
@@ -379,7 +433,7 @@ llvm::Function *Compiler::getMainWrapper(llvm::FunctionType *func_ty) const {
 llvm::FunctionType *Compiler::getLLVMFuncType(const CallableType &ty) {
   std::vector<llvm::Type *> func_args;
   ReturnStrategy return_strat = getCallableReturnStrategy(ty);
-  if (return_strat == ReturnAsFirstArg) {
+  if (return_strat == MayReturnFirstArg) {
     // The return type of this function is too large to return in IR (such as a
     // composite type with many elements). So we should instead allocate the
     // buffer in the caller and the function is in charge of "returning" the
@@ -400,11 +454,10 @@ llvm::FunctionType *Compiler::getLLVMFuncType(const CallableType &ty) {
     }
     func_args.push_back(llvm_arg_ty);
   }
-  llvm::Type *ret_ty = return_strat == ReturnAsFirstArg
-                           ? llvm::Type::getVoidTy(mod_.getContext())
+  llvm::Type *ret_ty = return_strat == MayReturnFirstArg
+                           ? llvm::PointerType::getUnqual(mod_.getContext())
                            : getLLVMType(ty.getReturnType());
-  if (llvm::isa<CallableType>(ty.getReturnType()) ||
-      return_strat == ReturnFirstArgInPlace)
+  if (llvm::isa<CallableType>(ty.getReturnType()))
     ret_ty = llvm::PointerType::getUnqual(mod_.getContext());
   return llvm::FunctionType::get(ret_ty, func_args, /*isVarArg=*/false);
 }
@@ -492,21 +545,26 @@ llvm::Type *Compiler::getLLVMType(const NamedType &type) {
   UNREACHABLE("Unhandled type name: %s", type.getName().data());
 }
 
-void Compiler::ReplaceAllUsesWith(llvm::Value *replacement,
-                                  llvm::Value *replacing) {
+llvm::Value *Compiler::ReplaceAllocasWith(llvm::Value *replacement,
+                                          llvm::Value *replacing) {
   if (replacement == replacing)
-    return;
+    return replacement;
 
   // Do a normal replacement.
-  replacing->replaceAllUsesWith(replacement);
+  if (llvm::isa<llvm::AllocaInst>(replacing)) {
+    replacing->replaceAllUsesWith(replacement);
+    return replacement;
+  }
 
   // Doing a traditional Value::replaceAllUsesWith doesn't replace the incoming
   // values of the phi node with the replacement, so instead we need to manually
   // call RAUW on the incoming nodes. Then we can just delete the phi node.
   if (auto *phi = llvm::dyn_cast<llvm::PHINode>(replacing)) {
     for (llvm::Value *incoming : phi->incoming_values())
-      ReplaceAllUsesWith(replacement, incoming);
+      ReplaceAllocasWith(replacement, incoming);
   }
+
+  return replacing;
 }
 
 llvm::Value *Compiler::getCallable(llvm::IRBuilder<> &builder,
@@ -535,6 +593,9 @@ void Compiler::FillFuncBody(const Callable &callable, llvm::Function *func,
   assert(!processed_exprs_.contains(&callable));
   processed_exprs_.try_emplace(&callable, func);
 
+  const Callable *old_callable = this_callable_;
+  this_callable_ = &callable;
+
   const SourceLocation &start = callable.getStart();
   llvm::DISubprogram *SP = di_builder_.createFunction(
       &di_unit_, name, name, &di_unit_, start.getRow(),
@@ -545,11 +606,11 @@ void Compiler::FillFuncBody(const Callable &callable, llvm::Function *func,
 
   const CallableType &ty = callable.getType();
   ReturnStrategy return_strat = getCallableReturnStrategy(ty);
-  if (return_strat == ReturnAsFirstArg)
+  if (return_strat == MayReturnFirstArg)
     func->getArg(0)->setName("return_val");
 
   for (size_t i = 0; i < callable.getNumArgs(); ++i)
-    func->getArg(i + (return_strat == ReturnAsFirstArg))
+    func->getArg(i + (return_strat == MayReturnFirstArg))
         ->setName(callable.getArgName(i));
 
   // Create the function body.
@@ -560,19 +621,10 @@ void Compiler::FillFuncBody(const Callable &callable, llvm::Function *func,
   auto processed_exprs_cpy = processed_exprs_;
   llvm::Value *ret = getExpr(nested_builder, callable.getBody());
   processed_exprs_ = processed_exprs_cpy;
-  switch (return_strat) {
-    case ReturnAsFirstArg:
-      ReplaceAllUsesWith(func->getArg(0), ret);
-      nested_builder.CreateRetVoid();
-      break;
-    case ReturnNormalType:
-    case ReturnFirstArgInPlace:
-      assert(
-          !ResolvesToAlloca(ret) &&
-          "Returning a pointer to an alloca can result in a use-after-return");
-      nested_builder.CreateRet(ret);
-      break;
-  }
+
+  assert(!ResolvesToAlloca(ret) &&
+         "Returning a pointer to an alloca can result in a use-after-return");
+  nested_builder.CreateRet(ret);
 
   assert(func->getSubprogram());
   di_builder_.finalizeSubprogram(func->getSubprogram());
@@ -581,6 +633,8 @@ void Compiler::FillFuncBody(const Callable &callable, llvm::Function *func,
     func->print(llvm::errs());
     UNREACHABLE("Function for callable %p not well-formed", &callable);
   }
+
+  this_callable_ = old_callable;
 }
 
 llvm::Value *Compiler::getLet(llvm::IRBuilder<> &builder, const Let &let) {
@@ -697,7 +751,8 @@ llvm::Value *Compiler::getExprImpl(llvm::IRBuilder<> &builder,
       // This should've already been cached.
       llvm::Function *func =
           llvm::cast<llvm::Function>(processed_exprs_.at(&parent));
-      bool return_as_arg = func->getReturnType()->isVoidTy();
+      bool return_as_arg =
+          getCallableReturnStrategy(parent.getType()) == MayReturnFirstArg;
       return func->getArg(arg.getArgNo() + return_as_arg);
     }
     case Node::NK_Int:
@@ -808,7 +863,7 @@ llvm::Value *Compiler::getReadc(llvm::IRBuilder<> &builder,
     return func;
 
   auto *func_ty = llvm::cast<llvm::FunctionType>(getLLVMType(readc));
-  assert(func_ty->getReturnType()->isVoidTy());
+  assert(getCallableReturnStrategy(readc.getType()) == MayReturnFirstArg);
   assert(func_ty->getNumParams() == 2);
 
   llvm::Function *func = llvm::Function::Create(
@@ -828,22 +883,13 @@ llvm::Value *Compiler::getReadc(llvm::IRBuilder<> &builder,
   llvm::Value *gep = readc_builder.CreateConstGEP2_32(
       getLLVMType(readc.getType().getReturnType()), func->getArg(0), 0, 1);
   readc_builder.CreateStore(getc_call, gep);
-  readc_builder.CreateRetVoid();
+  readc_builder.CreateRet(func->getArg(0));
 
   return func;
 }
 
 llvm::Value *Compiler::getZero(llvm::IRBuilder<> &builder, const Zero &zero) {
   const Type &t = zero.getType();
-
-  if (t.isMutable()) {
-    // This is always mutable, so lets make it a stack allocation.
-    llvm::AllocaInst *alloc = builder.CreateAlloca(getLLVMType(zero));
-    size_t size = *alloc->getAllocationSize(mod_.getDataLayout());
-    builder.CreateMemSet(alloc, llvm::Constant::getNullValue(getIntType(8)),
-                         size, llvm::MaybeAlign());
-    return alloc;
-  }
 
   // These can be just constants.
   if (t.isAggregateType()) {
@@ -934,16 +980,21 @@ llvm::Value *Compiler::getGet(llvm::IRBuilder<> &builder, const Get &get) {
 
 llvm::Value *Compiler::getSet(llvm::IRBuilder<> &builder, const Set &set) {
   llvm::Value *expr = getExpr(builder, set.getExpr());
-  if (auto *glob = llvm::dyn_cast<llvm::GlobalVariable>(expr)) {
-    assert(!glob->isConstant() && "Attempting to store to a constant global");
-  }
   llvm::Type *expr_ty = getLLVMType(set.getExpr());
+
+  // Do a full memcpy before the store because this may be a new copy.
+  llvm::Value *alloc = GetAllocaOrReturnValStorage(builder, set);
+  size_t size = mod_.getDataLayout().getTypeAllocSize(expr_ty);
+  builder.CreateMemCpy(alloc, llvm::MaybeAlign(), expr, llvm::MaybeAlign(),
+                       size);
+
   llvm::Value *gep =
-      builder.CreateGEP(expr_ty, expr,
+      builder.CreateGEP(expr_ty, alloc,
                         {llvm::Constant::getNullValue(getIntType(32)),
                          getExpr(builder, set.getIdx())});
+
   DoStore(builder, gep, set.getStore());
-  return expr;
+  return alloc;
 }
 
 llvm::Value *Compiler::getCast(llvm::IRBuilder<> &builder, const Cast &cast) {
@@ -979,8 +1030,8 @@ llvm::Value *Compiler::getCast(llvm::IRBuilder<> &builder, const Cast &cast) {
 
       if (to_arr.getNumElems() > from_arr.getNumElems()) {
         // Create a copy of a larger size then return that.
-        llvm::AllocaInst *alloc = builder.CreateAlloca(llvm_to);
-        size_t to_size = *alloc->getAllocationSize(mod_.getDataLayout());
+        llvm::Value *alloc = GetAllocaOrReturnValStorage(builder, cast);
+        size_t to_size = mod_.getDataLayout().getTypeAllocSize(llvm_to);
         size_t from_size = mod_.getDataLayout().getTypeAllocSize(llvm_from);
         assert(to_size > from_size);
         builder.CreateMemSet(alloc, llvm::Constant::getNullValue(getIntType(8)),
@@ -1021,13 +1072,12 @@ llvm::Value *Compiler::getCall(llvm::IRBuilder<> &builder, const Call &call) {
   std::vector<llvm::Value *> args;
   const auto &func_type = llvm::cast<CallableType>(call.getFunc().getType());
   ReturnStrategy return_strat = getCallableReturnStrategy(func_type);
-  if (return_strat == ReturnAsFirstArg) {
+  if (return_strat == MayReturnFirstArg) {
     // The return type of this function is too large to return in IR (such as a
     // composite type with many elements). So we should instead allocate the
     // buffer in the caller and the function is in charge of "returning" the
     // value by initializing the first argument.
-    llvm::Value *alloc =
-        builder.CreateAlloca(getLLVMType(func_type.getReturnType()));
+    llvm::Value *alloc = GetAllocaOrReturnValStorage(builder, call);
     args.push_back(alloc);
   }
 
@@ -1046,7 +1096,7 @@ llvm::Value *Compiler::getCall(llvm::IRBuilder<> &builder, const Call &call) {
   ret->setDebugLoc(
       llvm::DILocation::get(di_unit_.getContext(), call.getStart().getRow(),
                             call.getStart().getCol(), func->getSubprogram()));
-  return return_strat == ReturnAsFirstArg ? args.front() : ret;
+  return ret;
 }
 
 void Compiler::DoStore(llvm::IRBuilder<> &builder, llvm::Value *store_ptr,
@@ -1066,10 +1116,11 @@ llvm::Value *Compiler::getStruct(llvm::IRBuilder<> &builder, const Struct &s) {
   llvm::StructType *llvm_ty = llvm::cast<llvm::StructType>(getLLVMType(t));
   auto &field_layout = cached_ordered_fields_.at(&t);
 
-  // if (t.isMutable()) {
-  //  This is always mutable, so lets make it a stack allocation.
-  llvm::Value *alloc = builder.CreateAlloca(llvm_ty);
-
+  // Since the struct elements may not be constant, we can instead just
+  // alloca our structure.
+  //
+  // TODO: If the type is immutable, we should emit a constant global instead.
+  llvm::Value *alloc = GetAllocaOrReturnValStorage(builder, s);
   for (size_t i = 0; i < field_layout.size(); ++i) {
     std::string_view name = field_layout.at(i).first;
     const Expr &e = s.getField(name);
@@ -1077,19 +1128,6 @@ llvm::Value *Compiler::getStruct(llvm::IRBuilder<> &builder, const Struct &s) {
     DoStore(builder, ptr, e);
   }
   return alloc;
-  //}
-
-  // FIXME: We can only use a Constant here if we know this value is evaluatable
-  // at compile time, but we don't have any way to support that.
-  //
-  //// This is a constant, so we can just create a global variable.
-  // auto *glob = llvm::ConstantStruct::get(llvm_ty, );
-  // auto *initializer = llvm::Constant::getNullValue(getLLVMType(t));
-  // auto *glob =
-  //     new llvm::GlobalVariable(mod_, getLLVMType(t), /*isConstant=*/true,
-  //                              /*Linkage=*/llvm::GlobalValue::ExternalLinkage,
-  //                              initializer, /*name=*/"");
-  // return glob;
 }
 
 llvm::Value *Compiler::getComposite(llvm::IRBuilder<> &builder,
@@ -1099,7 +1137,7 @@ llvm::Value *Compiler::getComposite(llvm::IRBuilder<> &builder,
   //
   // TODO: If the type is immutable, we should emit a constant global instead.
   llvm::Type *comp_ty = getLLVMType(comp);
-  llvm::Value *buff = builder.CreateAlloca(comp_ty);
+  llvm::Value *buff = GetAllocaOrReturnValStorage(builder, comp);
   for (size_t i = 0; i < comp.getNumElems(); ++i) {
     const Expr &elem = comp.getElem(i);
     llvm::Value *ptr = builder.CreateConstGEP2_32(comp_ty, buff, 0, i);

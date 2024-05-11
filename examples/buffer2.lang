@@ -12,12 +12,12 @@ def read_from_buff = \IO io [3 x [4 x char]] buff int x -> IO
 def func = \[4 x char] s bool cond -> [4 x char]
   if cond s else zero as [4 x char]
 
-def write_to_buff = \mut GENERIC buff int x [4 x char] s bool cond -> mut [3 x [4 x char]]
+def write_to_buff = \GENERIC buff int x [4 x char] s bool cond -> [3 x [4 x char]]
   let v = func(s cond)
   SET buff x v
 
 def main = \IO io -> IO
-  let buff = zero as mut [3 x [4 x char]]
+  let buff = zero as [3 x [4 x char]]
   let buff2 = write_to_buff(buff 0 "abc" true)
   let buff3 = write_to_buff(buff2 1 "xyz" false)
   let buff4 = write_to_buff(buff3 2 "123" true)
