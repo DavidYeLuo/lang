@@ -20,7 +20,8 @@ add_executable(lang-tests
   testlexer.cpp
   testargparse.cpp
   testparser.cpp
-  testcompiler.cpp)
+  testcompiler.cpp 
+  testastdumper.cpp)
 
 target_compile_options(lang-tests BEFORE PRIVATE ${LLVM_CONFIG_CXX_FLAGS})
 
